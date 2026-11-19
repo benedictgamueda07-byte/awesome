@@ -1329,12 +1329,30 @@ Private Function LookupPackage(ByVal prg As String, ByVal pkg As String, months 
     LookupPackage = False
 End Function
 
-' Label shown in the Package column: "6 Months", "VIP 6 Months", "4x 1 Month"
+' Label shown in the Package column: "6 Months", "VIP 6 Months", "4x 1 Month",
+' or the program's Short label from Settings ("R&W 3 Months")
 Private Function PackageLabel(ByVal prg As String, ByVal pkg As String, ByVal k As Long) As String
     Dim vpart As String
-    vpart = Trim$(Replace(prg, SecBaseProgram(k), "", 1, -1, vbTextCompare))
-    If vpart = prg Then vpart = ""
+    vpart = ProgramShortLabel(prg)
+    If vpart = "" Then
+        vpart = Trim$(Replace(prg, SecBaseProgram(k), "", 1, -1, vbTextCompare))
+        If StrComp(vpart, prg, vbTextCompare) = 0 And InStr(1, prg, SecBaseProgram(k), vbTextCompare) > 0 Then vpart = ""
+    End If
     If vpart = "" Then PackageLabel = pkg Else PackageLabel = vpart & " " & pkg
+End Function
+
+Private Function ProgramShortLabel(ByVal prg As String) As String
+    Dim t As Variant, i As Long
+    On Error GoTo Done
+    t = Range("ProgTable").Value
+    If UBound(t, 2) < 3 Then Exit Function
+    For i = 1 To UBound(t, 1)
+        If StrComp(CleanText(CStr(t(i, 1))), prg, vbTextCompare) = 0 Then
+            ProgramShortLabel = CleanText(CStr(t(i, 3)))
+            Exit Function
+        End If
+    Next i
+Done:
 End Function
 
 '==============================================================================

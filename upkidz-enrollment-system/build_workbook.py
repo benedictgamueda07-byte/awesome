@@ -52,7 +52,8 @@ SECTIONS = [
          cols=["No.", "Full Name", "Package", "Price", "Per Month"],
          dark=TUT_DARK, light=TUT_LIGHT),
 ]
-WIDTHS = {"No.": 5.5, "Full Name": 27, "Package": 16, "Discount": 11.5, "Price": 13, "Per Month": 13}
+WIDTHS = {"No.": 5.5, "Full Name": 31, "Package": 16, "Discount": 11.5, "Price": 13, "Per Month": 13}
+TUTOR_PACKAGE_W = 24        # One-on-One labels are longer ("After-school 2 Months (4x)")
 SECTION_NAMES = ["Toddlers Group", "Preschool Group", "One-on-One Tutoring"]
 
 # client's price list (Settings)
@@ -123,7 +124,7 @@ st = wb.active
 st.title = "Settings"
 st.sheet_properties.tabColor = "808080"
 st.sheet_view.showGridLines = False
-for col, w in zip("ABCDEFGHI", [26, 14, 10, 15, 36, 3, 26, 22, 3]):
+for col, w in zip("ABCDEFGHI", [26, 14, 10, 15, 36, 3, 26, 22, 16]):
     st.column_dimensions[col].width = w
 st.merge_cells("A1:H1")
 st["A1"] = "SYSTEM SETTINGS & PRICE LIST"
@@ -167,15 +168,17 @@ for i, m in enumerate(MONTHS):
 PROG_HDR, PROG_FIRST, PROG_LAST = 21, 22, 31
 header_cell(st.cell(PROG_HDR, 7), "Program")
 header_cell(st.cell(PROG_HDR, 8), "Monthly-sheet Section")
+header_cell(st.cell(PROG_HDR, 9), "Short label (optional)")
 for r in range(PROG_FIRST, PROG_LAST + 1):
     i = r - PROG_FIRST
     if i < len(PROGRAMS):
         st.cell(r, 7, PROGRAMS[i][0])
         st.cell(r, 8, PROGRAMS[i][1])
-    for cc in (7, 8):
+    for cc in (7, 8, 9):
         c = st.cell(r, cc)
         c.border, c.font = BORDER, font(10, color=INPUT_TXT)
-st.cell(PROG_LAST + 1, 7, "Section decides which table the student goes to on the monthly sheets.").font = font(9, color=GREY_TXT, italic=True)
+st.cell(PROG_LAST + 1, 7, "Section decides which table the student goes to on the monthly sheets. Short label "
+        "(optional) is shown before the package on the monthly sheets, e.g. R&W 3 Months.").font = font(9, color=GREY_TXT, italic=True)
 dv = DataValidation(type="list", formula1='"' + ",".join(SECTION_NAMES) + '"', allow_blank=True)
 st.add_data_validation(dv)
 dv.add(f"H{PROG_FIRST}:H{PROG_LAST}")
@@ -187,7 +190,7 @@ dv.add(f"A{PKG_FIRST}:A{PKG_LAST}")
 st.freeze_panes = "A7"
 
 name("MonthList", "Settings!$G$7:$G$18")
-name("ProgTable", f"Settings!$G${PROG_FIRST}:$H${PROG_LAST}")
+name("ProgTable", f"Settings!$G${PROG_FIRST}:$I${PROG_LAST}")
 name("ProgramList", f"OFFSET(Settings!$G${PROG_FIRST},0,0,MAX(1,COUNTA(Settings!$G${PROG_FIRST}:$G${PROG_LAST})),1)")
 name("PkgProgram", f"Settings!$A${PKG_FIRST}:$A${PKG_LAST}")
 name("PkgName", f"Settings!$B${PKG_FIRST}:$B${PKG_LAST}")
@@ -492,6 +495,8 @@ def build_month(ws, idx, month):
         s, n = sec["start"], len(sec["cols"])
         for j, h in enumerate(sec["cols"]):
             ws.column_dimensions[L(s + j)].width = WIDTHS[h]
+            if h == "Package" and sec["key"] == "Tutor":
+                ws.column_dimensions[L(s + j)].width = TUTOR_PACKAGE_W
         ws.column_dimensions[L(s + n)].width = 12
         ws.column_dimensions[L(s + n)].hidden = True       # Enrollment ID
         if sec is not SECTIONS[-1]:
