@@ -12,6 +12,7 @@ Attribute VB_Name = "UpKidzEnrollment"
 '    SearchStudent         - show a student's profile (all enrollments)
 '    ReEnrollStudent       - fill the form for a returning student
 '    GoToDashboard         - navigation
+'    SortAllMonths         - re-sort every month (runs automatically after changes)
 '    RefreshEndOfYear      - rebuild the End of Year record (runs automatically)
 '    CopyForNextYear       - End of Year button: copy the record for next year
 '    ImportCarryOver       - Beginning of Year button (manual transfer)
@@ -136,6 +137,7 @@ Public Sub SubmitEnrollment()
     newID = NextEnrollmentID()
     WriteToMonths months, newID
     LogNew newID, sid, IIf(isReturning, "Re-enrollment", "New"), months, nextM, Now
+    SortAllMonths
     RefreshEndOfYear
     Application.ScreenUpdating = True
 
@@ -226,6 +228,7 @@ Public Sub UpdateEnrollment()
     removed = RemoveFromMonths(id)
     If ArrLen(months) > 0 Then WriteToMonths months, id
     LogUpdate r, months, nextM
+    SortAllMonths
     RefreshEndOfYear
     Application.ScreenUpdating = True
 
@@ -273,6 +276,7 @@ Public Sub CancelEnrollment()
     lg.Cells(r, LC_STATUS).Value = "Cancelled"
     lg.Cells(r, LC_UPDATED).Value = Now
     lg.Cells(r, LC_REMARKS).Value = Trim$(lg.Cells(r, LC_REMARKS).Value & " Cancelled " & Format$(Now, "yyyy-mm-dd") & ".")
+    SortAllMonths
     RefreshEndOfYear
     Application.ScreenUpdating = True
 
@@ -447,7 +451,7 @@ Private Function ReadForm(isEdit As Boolean) As Boolean
 
     ReadForm = False
     fProgram = CleanText(CStr(SafeGet("inProgram")))
-    fName = CleanText(CStr(SafeGet("inName")))
+    fName = ProperName(CleanText(CStr(SafeGet("inName"))))
     fPackage = CleanText(CStr(SafeGet("inPackage")))
     fStartMonth = MonthIndex(CStr(SafeGet("inStartMonth")))
     fStatus = IIf(LCase$(Trim$(CStr(SafeGet("inStatus")))) = "dropped", "Dropped", "Active")
@@ -1069,6 +1073,7 @@ Private Sub DoImport(auto As Boolean)
         If res = "Already transferred" Then nSame = nSame + 1
         bo.Cells(r, RC_RESULT).Value = res
     Next r
+    SortAllMonths
     RefreshEndOfYear
     Application.ScreenUpdating = True
     Application.EnableEvents = eventsWere
@@ -1089,7 +1094,7 @@ End Sub
 Private Function CarryRow(bo As Worksheet, ByVal r As Long, months As Variant) As String
     Dim i As Long, sid As String, eid As String, existing As String
     eid = UCase$(Trim$(CStr(bo.Cells(r, LC_EID).Value)))
-    fName = CleanText(CStr(bo.Cells(r, LC_NAME).Value))
+    fName = ProperName(CleanText(CStr(bo.Cells(r, LC_NAME).Value)))
     fProgram = CleanText(CStr(bo.Cells(r, LC_PROGRAM).Value))
     fPackage = CleanText(CStr(bo.Cells(r, LC_PACKAGE).Value))
     fMonths = CLng(Val(CStr(bo.Cells(r, LC_MONTHS).Value)))
@@ -1331,6 +1336,149 @@ Private Function PackageLabel(ByVal prg As String, ByVal pkg As String, ByVal k 
     If vpart = prg Then vpart = ""
     If vpart = "" Then PackageLabel = pkg Else PackageLabel = vpart & " " & pkg
 End Function
+
+'==============================================================================
+'  SORTING & NAME CAPITALS
+'==============================================================================
+' Sorts every program table of every month: longest package first, then
+' names A-Z. Only values move (Name..ID); formulas and formatting stay.
+Public Sub SortAllMonths()
+    Dim m As Long, k As Long, ws As Worksheet
+    For m = 1 To 12
+        Set ws = Worksheets(MonthSheet(m))
+        For k = 1 To 3
+            SortSection ws, k
+        Next k
+    Next m
+End Sub
+
+Private Sub SortSection(ws As Worksheet, ByVal k As Long)
+    Dim sc As Long, ic As Long, nCols As Long, nRows As Long, data As Variant
+    Dim idx() As Long, n As Long, r As Long, i As Long, j As Long, t As Long, c As Long
+    Dim keep() As Variant, changed As Boolean
+    sc = SecCol(k)
+    ic = SecIdCol(k)
+    nCols = ic - sc
+    nRows = LAST_ROW - FIRST_ROW + 1
+    data = ws.Range(ws.Cells(FIRST_ROW, sc + 1), ws.Cells(LAST_ROW, ic)).Value
+    ReDim idx(1 To nRows)
+    For r = 1 To nRows
+        If Not RowArrayEmpty(data, r, nCols) Then
+            n = n + 1
+            idx(n) = r
+        End If
+    Next r
+    If n = 0 Then Exit Sub
+    ' insertion sort (at most 100 rows)
+    For i = 2 To n
+        t = idx(i)
+        j = i - 1
+        Do While j >= 1
+            If Not RowBefore(data, t, idx(j)) Then Exit Do
+            idx(j + 1) = idx(j)
+            j = j - 1
+        Loop
+        idx(j + 1) = t
+    Next i
+    For i = 1 To n
+        If idx(i) <> i Then changed = True
+    Next i
+    If Not changed Then Exit Sub
+    ReDim keep(1 To n, 1 To nCols)
+    For i = 1 To n
+        For c = 1 To nCols
+            keep(i, c) = data(idx(i), c)
+        Next c
+    Next i
+    ws.Range(ws.Cells(FIRST_ROW, sc + 1), ws.Cells(LAST_ROW, ic)).ClearContents
+    ws.Range(ws.Cells(FIRST_ROW, sc + 1), ws.Cells(FIRST_ROW + n - 1, ic)).Value = keep
+End Sub
+
+' True if row a should come before row b (column 1 = name, 2 = package label)
+Private Function RowBefore(data As Variant, ByVal a As Long, ByVal b As Long) As Boolean
+    Dim ma As Long, mb As Long, cmp As Long
+    ma = LabelMonths(CStr(data(a, 2)))
+    mb = LabelMonths(CStr(data(b, 2)))
+    If ma <> mb Then
+        RowBefore = (ma > mb)
+        Exit Function
+    End If
+    cmp = StrComp(CStr(data(a, 1)), CStr(data(b, 1)), vbTextCompare)
+    If cmp <> 0 Then
+        RowBefore = (cmp < 0)
+    Else
+        RowBefore = (a < b)
+    End If
+End Function
+
+' Months in a package label: "6 Months" -> 6, "2x 10 Months" -> 10, "VIP 3 Months" -> 3
+Private Function LabelMonths(ByVal lbl As String) As Long
+    Dim parts As Variant, i As Long
+    parts = Split(Trim$(lbl), " ")
+    For i = 1 To UBound(parts)
+        If LCase$(Left$(CStr(parts(i)), 5)) = "month" And IsNumeric(parts(i - 1)) Then
+            LabelMonths = CLng(parts(i - 1))
+            Exit Function
+        End If
+    Next i
+    LabelMonths = 0
+End Function
+
+' "bENEDICT  gamueda" -> "Benedict Gamueda", "maria o'neil-santos" -> "Maria O'Neil-Santos"
+Public Function ProperName(ByVal s As String) As String
+    Dim i As Long, ch As String, prev As String, out As String
+    s = LCase$(s)
+    prev = " "
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If prev = " " Or prev = "-" Or prev = "'" Or prev = "." Or prev = "(" Then
+            out = out & UCase$(ch)
+        Else
+            out = out & ch
+        End If
+        prev = ch
+    Next i
+    ProperName = out
+End Function
+
+' Called by the monthly sheets when someone types a name directly:
+' capitalises names typed in the Full Name columns.
+Public Sub FixNameCase(ByVal Target As Range)
+    Dim cell As Range, area As Range, v As String, eventsWere As Boolean
+    On Error GoTo Done
+    Set area = Intersect(Target, Union(Target.Worksheet.Range("C" & FIRST_ROW & ":C" & LAST_ROW), _
+                                       Target.Worksheet.Range("K" & FIRST_ROW & ":K" & LAST_ROW), _
+                                       Target.Worksheet.Range("S" & FIRST_ROW & ":S" & LAST_ROW)))
+    If area Is Nothing Then Exit Sub
+    eventsWere = Application.EnableEvents
+    Application.EnableEvents = False
+    For Each cell In area.Cells
+        If Not IsError(cell.Value) Then
+            v = CStr(cell.Value)
+            If v <> "" And Not IsNumeric(v) Then
+                If ProperName(CleanText(v)) <> v Then cell.Value = ProperName(CleanText(v))
+            End If
+        End If
+    Next cell
+    Application.EnableEvents = eventsWere
+    Exit Sub
+Done:
+    Application.EnableEvents = True
+End Sub
+
+' Called by the Dashboard when the Full Name cell is typed in
+Public Sub FixFormName(ByVal Target As Range)
+    Dim v As String
+    On Error GoTo Done
+    If Intersect(Target, Range("inName")) Is Nothing Then Exit Sub
+    v = CStr(Range("inName").Value)
+    If v <> "" And ProperName(CleanText(v)) <> v Then
+        Application.EnableEvents = False
+        Range("inName").Value = ProperName(CleanText(v))
+    End If
+Done:
+    Application.EnableEvents = True
+End Sub
 
 '==============================================================================
 '  HELPERS

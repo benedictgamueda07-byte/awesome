@@ -35,6 +35,8 @@ Requires **Microsoft Excel Desktop for Windows** (Excel 2010 or later).
 | Snapshot and summary | The Dashboard **Monthly Snapshot** and the **Monthly Summary** sheet show all of these per month. |
 | Colors | #375623 / #E2EFDA Toddlers, #1F4E78 / #DDEBF7 Preschool, #203764 / #D9E1F2 One-on-One and headers, #FFC107 accents. |
 | CLEAR FORM fixed | It now works even if a form cell has been removed. |
+| Sorted lists | Every program table on every month is sorted **longest package first** (10 → 6 → 3 → 1 months; VIP / 2x / 4x count by their months), then **names A–Z**. It re-sorts automatically after every submit, update, drop, cancel and year transfer (macro: `SortAllMonths`). |
+| Capitalised names | Names are saved as "Benedict Gamueda" however they are typed. This covers the form, carried-over records, and names typed straight into a monthly sheet's Full Name column. Hyphens and apostrophes are handled ("Maria O'Neil-Santos"). |
 | Per-Month Equivalent | Removed from the form. It is still shown per student (**Per Month** column) on the monthly sheets. |
 
 ## 3. Year-end: continuing into next year's file

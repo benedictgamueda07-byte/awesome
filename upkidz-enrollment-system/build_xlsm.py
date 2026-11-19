@@ -229,7 +229,21 @@ def build_projectwm(modules):
 
 
 # Code placed in a sheet's own module (by sheet name)
+_NAME_CASE = ("Option Explicit\r\n\r\n"
+              "' Names typed in the Full Name columns are capitalised automatically.\r\n"
+              "Private Sub Worksheet_Change(ByVal Target As Range)\r\n"
+              "    UpKidzEnrollment.FixNameCase Target\r\n"
+              "End Sub\r\n")
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December"]
+
 SHEET_CODE = {
+    **{m: _NAME_CASE for m in _MONTHS},
+    "Dashboard": ("Option Explicit\r\n\r\n"
+                  "' The Full Name field is capitalised automatically.\r\n"
+                  "Private Sub Worksheet_Change(ByVal Target As Range)\r\n"
+                  "    UpKidzEnrollment.FixFormName Target\r\n"
+                  "End Sub\r\n"),
     "Beginning of Year": (
         "Option Explicit\r\n"
         "\r\n"
