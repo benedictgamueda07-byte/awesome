@@ -132,7 +132,7 @@ THISWORKBOOK_CODE = (
     "Private Sub Workbook_Open()\r\n"
     "    ' Make sure every button exists and is linked to its macro\r\n"
     "    On Error Resume Next\r\n"
-    "    Application.Run \"'\" & Me.Name & \"'!EnsureButtons\"\r\n"
+    "    UpKidzEnrollment.EnsureButtons\r\n"
     "End Sub\r\n")
 
 
@@ -228,12 +228,27 @@ def build_projectwm(modules):
     return b + b"\x00\x00"
 
 
-def build_vba_project_bin(sheet_codenames, bas_path):
+# Code placed in a sheet's own module (by sheet name)
+SHEET_CODE = {
+    "Beginning of Year": (
+        "Option Explicit\r\n"
+        "\r\n"
+        "' Pasting last year's End of Year record here starts the transfer automatically.\r\n"
+        "Private Sub Worksheet_Change(ByVal Target As Range)\r\n"
+        "    If Intersect(Target, Me.Range(\"A9:X3008\")) Is Nothing Then Exit Sub\r\n"
+        "    If Application.WorksheetFunction.CountA(Me.Range(\"A9:A3008\")) = 0 Then Exit Sub\r\n"
+        "    UpKidzEnrollment.AutoImportCarryOver\r\n"
+        "End Sub\r\n"),
+}
+
+
+def build_vba_project_bin(sheet_codenames, bas_path, sheet_names=None):
     std_name, std_src = std_module_source(bas_path)
     modules = [dict(name="ThisWorkbook", type="doc",
                     src=doc_module_source("ThisWorkbook", WORKBOOK_BASE, THISWORKBOOK_CODE))]
-    for cn in sheet_codenames:
-        modules.append(dict(name=cn, type="doc", src=doc_module_source(cn, SHEET_BASE)))
+    for i, cn in enumerate(sheet_codenames):
+        extra = SHEET_CODE.get(sheet_names[i], "") if sheet_names else ""
+        modules.append(dict(name=cn, type="doc", src=doc_module_source(cn, SHEET_BASE, extra)))
     modules.append(dict(name=std_name, type="std", src=std_src))
 
     project_id = "{" + str(uuid.uuid4()).upper() + "}"
@@ -418,9 +433,9 @@ DASH_BUTTONS = [  # name, text, macro, color, size, c1, c2, (row1, row2) 0-based
     ("btnReenroll", "RE-ENROLL", "ReEnrollStudent", "375623", 10, 8, 9, (11, 11)),
 ]
 SEARCH_BUTTONS = [("btnBack", "BACK TO DASHBOARD", "GoToDashboard", "203764", 9, 9, 11, (2, 2))]
-CARRY_W = [16, 11, 26, 22, 11, 11, 11, 11, 12, 11, 12, 12, 30, 11, 12, 11, 16, 30]
-EOY_BUTTONS = [("btnRefreshEoy", "REFRESH LIST", "RefreshEndOfYear", "1F4E78", 10, 14, 16, (2, 2))]
-BOY_BUTTONS = [("btnImport", "IMPORT CARRY-OVER", "ImportCarryOver", "375623", 11, 14, 17, (2, 2))]
+CARRY_W = [18, 11, 16, 13, 22, 18, 26, 11, 10, 11, 10, 34, 26, 12, 11, 12, 12, 10, 12, 10, 16, 40, 10, 10, 40]
+EOY_BUTTONS = [("btnCopyEoy", "COPY FOR NEXT YEAR", "CopyForNextYear", "375623", 11, 14, 17, (2, 2))]
+BOY_BUTTONS = [("btnImport", "IMPORT / TRANSFER", "ImportCarryOver", "375623", 11, 14, 17, (2, 2))]
 
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 DRAWING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
@@ -486,7 +501,7 @@ def main():
     assert b'codeName="ThisWorkbook"' in files["xl/workbook.xml"], "workbook has no codeName"
     part_of = {n: p for n, p, _ in sheets}
 
-    vba = build_vba_project_bin([cn for _, _, cn in sheets], BAS)
+    vba = build_vba_project_bin([cn for _, _, cn in sheets], BAS, [n for n, _, _ in sheets])
     files["xl/vbaProject.bin"] = vba
 
     rels = files["xl/_rels/workbook.xml.rels"].decode("utf-8")

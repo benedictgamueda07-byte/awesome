@@ -269,8 +269,8 @@ for r, _, _, kind in fields:
     if kind == "input":
         ds.cell(r, 3).border = Border(left=Side(style="thick", color=ACCENT), right=thin, top=thin, bottom=thin)
 
-ds["C8"] = ('=IF(TRIM(C7)="","",IFERROR("Returning student · "&INDEX(HistSID,MATCH(TRIM(C7),HistName,0))'
-            '&" (will be recorded as re-enrollment)","New student"))')
+ds["C8"] = ('=IF(TRIM(C7)="","",IFERROR("Returning student · "&IFERROR(INDEX(HistSID,MATCH(TRIM(C7),HistName,0)),'
+            'INDEX(ArchSID,MATCH(TRIM(C7),ArchName,0)))&" (will be recorded as re-enrollment)","New student"))')
 ds["C11"] = ('=IF(OR(C10="",selMonths=0),"",IF(ISNA(MATCH(C10,MonthList,0)),"Invalid start month",'
              'C10&IF(selMonths>1,"–"&INDEX(MonthList,MOD(MATCH(C10,MonthList,0)+selMonths-2,12)+1),"")'
              '&" ("&selMonths&IF(selMonths=1," month)"," months)")))')
@@ -742,7 +742,8 @@ for k, (lbl, f) in enumerate([
         ("Cancelled", f"=COUNTIF('Enrollment History'!$R${LOG_FIRST}:$R${LOG_LAST},\"Cancelled\")"),
         ("Re-enrollments", f"=COUNTIF('Enrollment History'!$D${LOG_FIRST}:$D${LOG_LAST},\"Re-enrollment\")"),
         ("Carry-overs (from last year)", f"=COUNTIF('Enrollment History'!$D${LOG_FIRST}:$D${LOG_LAST},\"Carry-over\")"),
-        ("Total enrollments", f"=COUNTA('Enrollment History'!$A${LOG_FIRST}:$A${LOG_LAST})")]):
+        ("Total enrollments", f"=COUNTA('Enrollment History'!$A${LOG_FIRST}:$A${LOG_LAST})"),
+        ("Previous-year records", "=COUNTA('Previous Years'!$A$5:$A$3004)")]):
     sm.cell(23 + k, 1, lbl).font = font(10)
     c = sm.cell(23 + k, 2, f)
     c.font, c.alignment = font(10, True), MID
@@ -772,54 +773,65 @@ sm.freeze_panes = "B5"
 ss = wb.create_sheet("Student Search")
 ss.sheet_properties.tabColor = PRE_DARK
 ss.sheet_view.showGridLines = False
-banner(ss, "A1:L1", "A2:L2", "STUDENT PROFILE", "Enrollment history of the searched student(s)")
+banner(ss, "A1:M1", "A2:M2", "STUDENT PROFILE", "Every enrollment of the searched student(s) — this year and previous years")
 ss.row_dimensions[3].height = 26
 ss["A3"] = "Search:"
 ss["A3"].font = font(10, True, NAVY)
 ss["B3"].font = font(11, True, INPUT_TXT)
 ss["D3"].font = font(10, True, GREY_TXT)
-SH = [("Student ID", 11), ("Full Name", 26), ("Enrollment ID", 13), ("Type", 13), ("Program", 22),
-      ("Package", 11), ("Start Month", 11), ("Months Covered", 34), ("Net Price", 12), ("Per Month", 12),
+SH = [("Year", 8), ("Student ID", 14), ("Full Name", 26), ("Enrollment ID", 15), ("Type", 13), ("Program", 22),
+      ("Package", 11), ("Start Month", 11), ("Months Covered", 40), ("Net Price", 12), ("Per Month", 12),
       ("Status", 10), ("Last Month", 11)]
 for j, (h, w) in enumerate(SH):
     ss.column_dimensions[L(j + 1)].width = w
     header_cell(ss.cell(5, j + 1), h, color=PRE_DARK)
 ss.row_dimensions[5].height = 22
 for r in range(6, 506):
-    for j in range(1, 13):
+    for j in range(1, 14):
         c = ss.cell(r, j)
         c.font = font(9)
-        if j in (9, 10):
+        if j in (10, 11):
             c.number_format = PESO
-ss.conditional_formatting.add("A6:L505", FormulaRule(formula=['$K6="Dropped"'], font=Font(name=FONT, color="C00000")))
-ss.conditional_formatting.add("A6:L505", FormulaRule(formula=['$K6="Cancelled"'], font=Font(name=FONT, color="A6A6A6", strike=True)))
-ss.conditional_formatting.add("A6:L505", FormulaRule(formula=['AND($A6<>"",MOD(ROW(),2)=1)'], fill=fill(PRE_LIGHT)))
+ss.conditional_formatting.add("A6:M505", FormulaRule(formula=['$L6="Dropped"'], font=Font(name=FONT, color="C00000")))
+ss.conditional_formatting.add("A6:M505", FormulaRule(formula=['$L6="Cancelled"'], font=Font(name=FONT, color="A6A6A6", strike=True)))
+ss.conditional_formatting.add("A6:M505", FormulaRule(formula=['AND($A6<>"",MOD(ROW(),2)=1)'], fill=fill(PRE_LIGHT)))
 ss.freeze_panes = "A6"
 
 # =============================================================================
-# END OF YEAR (carry-over out) / BEGINNING OF YEAR (carry-over in)
+# YEAR TRANSFER: END OF YEAR (out) / BEGINNING OF YEAR (in) / PREVIOUS YEARS (archive)
+# Same columns as Enrollment History + Record Year + Carry to Year.
 # =============================================================================
-CARRY_HDR, CARRY_FIRST, CARRY_LAST = 8, 9, 208
-CARRY = [("Enrollment ID", 13), ("Student ID", 11), ("Full Name", 26), ("Program", 22), ("Package", 11),
-         ("Months", 8), ("Start Month", 11), ("Start Year", 9), ("Program Fee", 12), ("Discount", 11),
-         ("Net Price", 12), ("Per Month", 12), ("Next-Year Months", 30), ("Status", 10),
-         ("Last Month Attended", 12), ("Last Month Year", 9), ("Date Submitted", 16)]
+REC_COLS = HIST + [("Record Year", 9), ("Carry to Year", 9)]
+CARRY_HDR, CARRY_FIRST, CARRY_LAST = 8, 9, 3008
+ARCH_FIRST, ARCH_LAST = 5, 3004
+
+
+def style_record_rows(ws, first, last, ncol, banded_rows=300):
+    for r in range(first, last + 1):
+        for j in range(1, ncol + 1):
+            c = ws.cell(r, j)
+            if j in (14, 15, 16, 17):
+                c.number_format = PESO
+            elif j in (3, 21):
+                c.number_format = "yyyy-mm-dd hh:mm"
+            elif r - first < banded_rows:
+                c.font = font(9)
 
 
 def build_carry(ws, title, sub, note, with_result):
     ws.sheet_view.showGridLines = False
-    ncol = len(CARRY) + (1 if with_result else 0)
-    last = L(ncol)
-    banner(ws, f"A1:{last}1", f"A2:{last}2", title, sub)
+    heads = REC_COLS + ([("Import Result", 40)] if with_result else [])
+    ncol = len(heads)
+    banner(ws, f"A1:{L(ncol)}1", f"A2:{L(ncol)}2", title, sub)
     ws.merge_cells("A3:N3")
     ws["A3"] = note
     ws["A3"].font = font(9, True, "7F6000")
     ws["A3"].fill = fill("FFF2CC")
     ws["A3"].alignment = Alignment(wrap_text=True, vertical="center", indent=1)
-    ws.row_dimensions[3].height = 42
-    # summary by next-year month
-    ws["A4"] = "Next-year month"
-    ws["A5"] = "Students"
+    ws.row_dimensions[3].height = 54
+    rng = lambda col: f"${col}${CARRY_FIRST}:${col}${CARRY_LAST}"
+    ws["A4"] = "Remaining months →"
+    ws["A5"] = "Students carried"
     ws["A6"] = "Equivalent sales"
     for r in (4, 5, 6):
         c = ws.cell(r, 1)
@@ -828,30 +840,24 @@ def build_carry(ws, title, sub, note, with_result):
         col = L(2 + i)
         h = ws.cell(4, 2 + i, m)
         h.font, h.fill, h.border, h.alignment = font(9, True, ACCENT), fill(NAVY), BORDER, MID
-        c = ws.cell(5, 2 + i, f'=COUNTIF($M${CARRY_FIRST}:$M${CARRY_LAST},"*"&{col}$4&"*")')
+        c = ws.cell(5, 2 + i, f'=COUNTIFS({rng("M")},"*"&{col}$4&"*",{rng("X")},">0")')
         c.font, c.border, c.alignment = font(10, True, NAVY), BORDER, MID
-        c = ws.cell(6, 2 + i, f'=SUMIF($M${CARRY_FIRST}:$M${CARRY_LAST},"*"&{col}$4&"*",$L${CARRY_FIRST}:$L${CARRY_LAST})')
+        c = ws.cell(6, 2 + i, f'=SUMIFS({rng("Q")},{rng("M")},"*"&{col}$4&"*",{rng("X")},">0")')
         c.font, c.border, c.alignment, c.number_format = font(9), BORDER, RIGHT, PESO
-    c = ws.cell(4, 14, "Enrollments")
-    c.font, c.fill, c.border, c.alignment = font(9, True, ACCENT), fill(NAVY), BORDER, MID
-    c = ws.cell(5, 14, f"=COUNTA(A{CARRY_FIRST}:A{CARRY_LAST})")
-    c.font, c.border, c.alignment = font(12, True, NAVY), BORDER, MID
-    heads = CARRY + ([("Import Result", 30)] if with_result else [])
+    for j, (lbl, f) in enumerate([("Records", f"=COUNTA({rng('A')})"),
+                                  ("Remaining packages", f'=COUNTIF({rng("X")},">0")')]):
+        c = ws.cell(4, 14 + j, lbl)
+        c.font, c.fill, c.border, c.alignment = font(9, True, ACCENT), fill(NAVY), BORDER, CENTER
+        c = ws.cell(5, 14 + j, f)
+        c.font, c.border, c.alignment = font(12, True, NAVY), BORDER, MID
     for j, (h, w) in enumerate(heads):
-        ws.column_dimensions[L(j + 1)].width = max(w, 11)
-        header_cell(ws.cell(CARRY_HDR, j + 1), h, color=PRE_DARK if not with_result else TOD_DARK)
-    ws.column_dimensions["A"].width = 16
+        ws.column_dimensions[L(j + 1)].width = max(w, 10)
+        header_cell(ws.cell(CARRY_HDR, j + 1), h, color=TOD_DARK if with_result else PRE_DARK)
+    ws.column_dimensions["A"].width = 18
     ws.row_dimensions[CARRY_HDR].height = 30
-    for r in range(CARRY_FIRST, CARRY_LAST + 1):
-        for j in range(1, ncol + 1):
-            c = ws.cell(r, j)
-            c.font, c.border = font(9), BORDER
-            if j in (9, 10, 11, 12):
-                c.number_format = PESO
-            elif j == 17:
-                c.number_format = "yyyy-mm-dd hh:mm"
-            if (r - CARRY_FIRST) % 2:
-                c.fill = fill(TUT_LIGHT)
+    style_record_rows(ws, CARRY_FIRST, CARRY_LAST, ncol)
+    ws.conditional_formatting.add(f"A{CARRY_FIRST}:{L(ncol)}{CARRY_LAST}", FormulaRule(
+        formula=[f'$X{CARRY_FIRST}>0'], fill=fill("FFF2CC"), font=Font(name=FONT, bold=True, color="7F6000")))
     ws.freeze_panes = f"B{CARRY_FIRST}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
@@ -861,21 +867,38 @@ def build_carry(ws, title, sub, note, with_result):
 
 eoy = wb.create_sheet("End of Year")
 eoy.sheet_properties.tabColor = "7F6000"
-build_carry(eoy, "END OF YEAR — CARRY-OVER TO NEXT YEAR",
-            "Months of this year's enrollments that fall in NEXT year (filled automatically — do not type here)",
-            "Packages that continue past December are listed here instead of being put in this year's January–March. "
-            "At year end: select the table rows (from row 9 down) → Copy → in NEXT year's workbook open "
-            "'Beginning of Year' → click cell A9 → Paste Values → click IMPORT CARRY-OVER.", False)
+build_carry(eoy, "END OF YEAR — FULL RECORD FOR NEXT YEAR",
+            "Every enrollment and student profile of this file (filled automatically — do not type here)",
+            "At year end: click COPY FOR NEXT YEAR → open NEXT year's file → sheet 'Beginning of Year' → click A9 → "
+            "press Ctrl+V. Next year's file then takes over everything automatically: all student profiles and "
+            "enrollment history, and the remaining months of unfinished packages (highlighted rows, e.g. an "
+            "October–March package continues in January–March).", False)
 boy = wb.create_sheet("Beginning of Year")
 boy.sheet_properties.tabColor = "7F6000"
-build_carry(boy, "BEGINNING OF YEAR — CARRY-OVER FROM LAST YEAR",
-            "Paste last year's End of Year rows here, then click IMPORT CARRY-OVER",
-            "Paste (values) the rows copied from LAST year's End of Year sheet at cell A9, then click IMPORT CARRY-OVER. "
-            "The students are added to this year's monthly sheets and Enrollment History (Type = Carry-over). "
-            "Rows already imported are skipped, so clicking twice is safe.", True)
+build_carry(boy, "BEGINNING OF YEAR — CONTINUATION FROM LAST YEAR",
+            "Paste last year's End of Year record at A9 — the transfer starts automatically",
+            "Click cell A9 and press Ctrl+V (paste what you copied from LAST year's End of Year). The transfer runs "
+            "automatically: profiles and history go to 'Previous Years', and unfinished packages are added to this "
+            "year's monthly sheets as Carry-over. Pasting the same record again is safe — nothing is added twice. "
+            "(If macros were off when you pasted, click IMPORT / TRANSFER.)", True)
+
+arch = wb.create_sheet("Previous Years")
+arch.sheet_properties.tabColor = "808080"
+arch.sheet_view.showGridLines = False
+banner(arch, f"A1:{L(len(REC_COLS))}1", f"A2:{L(len(REC_COLS))}2", "PREVIOUS YEARS",
+       "Student profiles and enrollments transferred from earlier years (read-only record)")
+for j, (h, w) in enumerate(REC_COLS):
+    arch.column_dimensions[L(j + 1)].width = w
+    header_cell(arch.cell(4, j + 1), h, color="595959")
+arch.row_dimensions[4].height = 30
+style_record_rows(arch, ARCH_FIRST, ARCH_LAST, len(REC_COLS))
+arch.freeze_panes = "C5"
+arch.auto_filter.ref = f"A4:{L(len(REC_COLS))}{ARCH_LAST}"
+name("ArchSID", f"'Previous Years'!$B${ARCH_FIRST}:$B${ARCH_LAST}")
+name("ArchName", f"'Previous Years'!$G${ARCH_FIRST}:$G${ARCH_LAST}")
 
 order = ["Dashboard"] + MONTHS + ["Monthly Summary", "Enrollment History", "Student Search",
-                                  "End of Year", "Beginning of Year", "Settings"]
+                                  "End of Year", "Beginning of Year", "Previous Years", "Settings"]
 wb._sheets = [wb[n] for n in order]
 wb.active = 0
 for ws in wb.worksheets:
