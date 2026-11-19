@@ -323,20 +323,20 @@ ds.conditional_formatting.add("E9:E13", FormulaRule(formula=['LEFT(E9,1)="⚠"']
                               font=Font(name=FONT, bold=True, color="C62828")))
 
 # data validation
-dv = DataValidation(type="list", formula1="=ProgramList", allow_blank=False,
+dv = DataValidation(type="list", formula1="ProgramList", allow_blank=False,
                     error="Choose Toddler PlayTrack, Preschool PlayTrack or One-on-One Tutoring.",
                     errorTitle="Invalid program")
 dv.showErrorMessage = True
 ds.add_data_validation(dv); dv.add("C6")
-dv = DataValidation(type="list", formula1="=ScheduleList", allow_blank=True)
+dv = DataValidation(type="list", formula1="ScheduleList", allow_blank=True)
 dv.showErrorMessage = False            # suggestions only; free text allowed
 ds.add_data_validation(dv); dv.add("C8")
-dv = DataValidation(type="list", formula1="=PackageChoices", allow_blank=False,
+dv = DataValidation(type="list", formula1="PackageChoices", allow_blank=False,
                     error="Choose a package listed for the selected program (see Settings).",
                     errorTitle="Invalid package")
 dv.showErrorMessage = True
 ds.add_data_validation(dv); dv.add("C9")
-dv = DataValidation(type="list", formula1="=MonthList", allow_blank=False,
+dv = DataValidation(type="list", formula1="MonthList", allow_blank=False,
                     error="Choose a month from January to December.", errorTitle="Invalid month")
 dv.showErrorMessage = True
 ds.add_data_validation(dv); dv.add("C10")
@@ -355,11 +355,8 @@ dv.showErrorMessage = True
 ds.add_data_validation(dv); dv.add("C13")
 
 # button zone
-ds.row_dimensions[17].height = 8
-ds.row_dimensions[18].height = 34
-ds.row_dimensions[19].height = 8
 ds["B18"] = "Buttons appear here after running the macro  InstallUpKidzSystem  (see README)."
-ds.merge_cells("B18:E18")
+ds.merge_cells("B18:E19")
 ds["B18"].font = font(9, False, GREY_TXT, True)
 ds["B18"].alignment = CENTER
 
@@ -391,7 +388,7 @@ ds["H15"] = "January"
 for cc in (8, 9, 10):
     ds.cell(15, cc).fill = fill(INPUT_FILL); ds.cell(15, cc).border = BORDER
 ds["H15"].font = font(11, True, "0000FF"); ds["H15"].alignment = LEFT
-dv = DataValidation(type="list", formula1="=MonthList", allow_blank=False)
+dv = DataValidation(type="list", formula1="MonthList", allow_blank=False)
 ds.add_data_validation(dv); dv.add("H15")
 ds["G16"], ds["H16"], ds["I16"] = "Program", "Students", "Total Value"
 ds.merge_cells("I16:J16")
@@ -417,7 +414,7 @@ ds.merge_cells("I20:J20")
 c = ds.cell(r, 9, "=SUM(I17:I19)"); c.font = font(11, True); c.number_format = PESO; c.alignment = RIGHT
 c.border = BORDER; c.fill = fill("CFD8DC"); ds.cell(r, 10).border = BORDER; ds.cell(r, 10).fill = fill("CFD8DC")
 for rr in (17, 18, 19, 20):
-    ds.row_dimensions[rr].height = 20
+    ds.row_dimensions[rr].height = 22
 
 ds["G21"] = "=\"Active enrollments on record: \"&COUNTIF('Enrollment History'!$M:$M,\"Active\")"
 ds.merge_cells("G21:J21"); ds["G21"].font = font(9, True, GREY_TXT)
@@ -695,6 +692,7 @@ ss.sheet_properties.tabColor = "00897B"
 ss.sheet_view.showGridLines = False
 banner(ss, "A1:J1", "A2:J2", "STUDENT SEARCH", "Results across all 12 monthly sheets")
 ss.row_dimensions[1].height = 30
+ss.row_dimensions[3].height = 24
 ss["A3"] = "Search term:"
 ss["A3"].font = font(10, True)
 ss["B3"].font = font(10, True, "0000FF")
@@ -720,6 +718,11 @@ wb._sheets = [wb[n] for n in order]
 wb.active = 0
 for ws in wb.worksheets:
     ws.sheet_view.tabSelected = ws.title == "Dashboard"
+
+# VBA code names (ThisWorkbook / Sheet1..SheetN) - used by build_xlsm.py
+wb.code_name = "ThisWorkbook"
+for i, ws in enumerate(wb.worksheets, start=1):
+    ws.sheet_properties.codeName = f"Sheet{i}"
 
 wb.save(OUT)
 print("saved", OUT)

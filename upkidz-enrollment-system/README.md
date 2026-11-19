@@ -2,43 +2,52 @@
 
 | File | What it is |
 |---|---|
-| `UpKidz_Enrollment_System.xlsx` | The workbook: Dashboard, 12 monthly sheets, Monthly Summary, Enrollment History, Student Search, Settings |
-| `UpKidzEnrollment.bas` | The VBA module: Submit, Edit, Update, Cancel, Search, and button installer |
-| `build_workbook.py` | Rebuilds the workbook from scratch (optional, for maintenance) |
+| **`UpKidz_Enrollment_System.xlsm`** | **Use this one.** A ready-to-use macro-enabled workbook with the VBA and all buttons already built in |
+| `UpKidz_Enrollment_System.xlsx` | The same workbook without macros (fallback, see below) |
+| `UpKidzEnrollment.bas` | The VBA module source (the same code that is inside the `.xlsm`) |
+| `build_workbook.py` / `build_xlsm.py` | Rebuild the `.xlsx` and then the `.xlsm` (optional, for maintenance) |
 
 Requires **Microsoft Excel Desktop for Windows** (Excel 2010 or later; Microsoft 365 recommended).
 
 ---
 
-## 1. Set up (one time, about 2 minutes)
+## 1. Getting started (no VBA editor needed)
 
-1. Open `UpKidz_Enrollment_System.xlsx` in Excel. Click **Enable Editing** if Excel asks.
-2. Press **Alt + F11** to open the VBA editor.
-3. Go to **File → Import File…**, choose `UpKidzEnrollment.bas`, and click **Open**.
-   A module named `UpKidzEnrollment` appears under *Modules*.
-4. Close the VBA editor and go back to Excel.
-5. Press **Alt + F8**, select **InstallUpKidzSystem**, and click **Run**.
-   This creates all the buttons on the Dashboard and the Student Search sheet.
-6. Go to **File → Save As**, choose **Excel Macro-Enabled Workbook (\*.xlsm)**, and save as
-   `UpKidz_Enrollment_System.xlsm`. From now on, use the `.xlsm` file.
-7. When you open the `.xlsm` file later, click **Enable Content** on the yellow security bar.
-   If Excel blocks macros entirely, right-click the file → **Properties** → tick **Unblock** → OK.
+1. Download `UpKidz_Enrollment_System.xlsm`.
+2. **Unblock it once.** Windows marks downloaded macro files as unsafe. Right-click the file →
+   **Properties** → tick **Unblock** (bottom of the General tab) → **OK**.
+   *(If you skip this, Excel shows a red "Microsoft has blocked macros" bar and the buttons won't work.)*
+3. Open it in Excel and click **Enable Content** on the yellow bar.
+4. That's it. The Dashboard buttons (SUBMIT ENROLLMENT, UPDATE ENROLLMENT, CLEAR FORM, LOAD FOR
+   EDIT, CANCEL ENROLLMENT, and SEARCH STUDENT) are already there and linked to their macros.
+5. After you enter data, keep saving as `.xlsm` (Ctrl + S is fine).
 
-### Creating or reassigning the buttons manually (only if you need to)
+**First open:** this file was generated outside Excel, so Excel compiles the VBA the first time you
+open it. This is automatic and takes a second. Each time the workbook opens, `Workbook_Open` also
+re-checks that every button is linked to its macro.
 
-`InstallUpKidzSystem` does this for you. To do it yourself:
-**Insert → Shapes → Rounded Rectangle**, draw it, type the label, then right-click it →
-**Assign Macro…** → choose the macro:
+**If a button ever goes missing:** press **Alt + F8** → run **InstallUpKidzSystem** to redraw them all.
 
-| Button label | Macro | Suggested place |
-|---|---|---|
-| SUBMIT ENROLLMENT | `SubmitEnrollment` | Dashboard B18:C18 |
-| UPDATE ENROLLMENT | `UpdateEnrollment` | Dashboard D18 |
-| CLEAR FORM | `ClearForm` | Dashboard E18 |
-| LOAD FOR EDIT | `LoadEnrollmentForEdit` | Dashboard G8:H8 |
-| CANCEL ENROLLMENT | `CancelEnrollment` | Dashboard I8:J8 |
-| SEARCH STUDENT | `SearchStudent` | Dashboard G12:J12 |
-| BACK TO DASHBOARD | `GoToDashboard` | Student Search H3:J3 |
+### Fallback: import the macros yourself
+Only if the `.xlsm` won't open properly on your PC:
+
+1. Open `UpKidz_Enrollment_System.xlsx`.
+2. Press **Alt + F11**, then **File → Import File…** → `UpKidzEnrollment.bas`.
+3. Press **Alt + F8** → run **InstallUpKidzSystem** (this creates the buttons).
+4. **File → Save As** → **Excel Macro-Enabled Workbook (\*.xlsm)**.
+
+To create a button by hand: **Insert → Shapes → Rounded Rectangle**, then right-click it →
+**Assign Macro…**:
+
+| Button label | Macro |
+|---|---|
+| SUBMIT ENROLLMENT | `SubmitEnrollment` |
+| UPDATE ENROLLMENT | `UpdateEnrollment` |
+| CLEAR FORM | `ClearForm` |
+| LOAD FOR EDIT | `LoadEnrollmentForEdit` |
+| CANCEL ENROLLMENT | `CancelEnrollment` |
+| SEARCH STUDENT | `SearchStudent` |
+| BACK TO DASHBOARD (Student Search sheet) | `GoToDashboard` |
 
 ---
 
@@ -159,5 +168,9 @@ Don't clear the **No.** column, which holds formulas.
   the `.bas` module and match `build_workbook.py`.
 - **Dashboard cells** are referenced by names (`inProgram`, `inName`, … `inEditID`, `inManageID`,
   `inSearch`), so you can move them without editing code. Use **Formulas → Name Manager**.
-- Rebuild a clean workbook with: `python3 build_workbook.py UpKidz_Enrollment_System.xlsx`
-  (requires `openpyxl`).
+- **Rebuild from source.** Edit `UpKidzEnrollment.bas` (and/or `build_workbook.py`), then run:
+  `python3 build_workbook.py UpKidz_Enrollment_System.xlsx` (requires `openpyxl`), then
+  `python3 build_xlsm.py`. The second step embeds the `.bas` into a fresh `.xlsm`: it generates
+  `xl/vbaProject.bin` per Microsoft's MS-OVBA/MS-CFB specs, adds the buttons, and needs only the
+  Python standard library. Keep the `.bas` ASCII-only, because VBA stores source in code page 1252.
+  *Note:* a freshly built `.xlsm` has no data in it.

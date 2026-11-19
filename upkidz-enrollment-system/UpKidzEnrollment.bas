@@ -4,7 +4,8 @@ Attribute VB_Name = "UpKidzEnrollment"
 '  VBA module for UpKidz_Enrollment_System workbook
 '
 '  Public macros (assign to buttons):
-'    InstallUpKidzSystem  - run ONCE after importing: creates all buttons
+'    InstallUpKidzSystem  - redraw all buttons (only needed if they get deleted)
+'    EnsureButtons        - runs automatically on open (re-links / adds buttons)
 '    SubmitEnrollment     - add a new enrollment to every covered month
 '    ClearForm            - clear the Dashboard form / leave edit mode
 '    LoadEnrollmentForEdit- load an Enrollment ID into the form
@@ -294,30 +295,44 @@ End Sub
 '  INSTALL: creates the buttons (run once after importing this module)
 '------------------------------------------------------------------------------
 Public Sub InstallUpKidzSystem()
+    BuildButtons True
+    Worksheets(SH_DASH).Activate
+    Notify "UpKidz Enrollment System buttons have been (re)created." & vbCrLf & vbCrLf & _
+           "Keep saving the workbook as an Excel Macro-Enabled Workbook (*.xlsm).", vbInformation
+End Sub
+
+' Called automatically from ThisWorkbook.Workbook_Open: creates any missing
+' button and makes sure every button points at the right macro. Silent.
+Public Sub EnsureButtons()
+    Dim wasSaved As Boolean
+    On Error Resume Next
+    wasSaved = ThisWorkbook.Saved
+    BuildButtons False
+    ThisWorkbook.Saved = wasSaved
+End Sub
+
+' recreate = True  : delete and redraw all buttons
+' recreate = False : keep existing buttons, re-link their macros, add missing ones
+Private Sub BuildButtons(recreate As Boolean)
     Dim ds As Worksheet, ss As Worksheet
     Set ds = Worksheets(SH_DASH)
     Set ss = Worksheets(SH_SEARCH)
-
-    DeleteButtons ds
-    DeleteButtons ss
-    ds.Range("B18").Value = ""
-
-    ' New-enrollment buttons (row 18)
-    AddButton ds, ds.Range("B18:C18"), "btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", RGB(46, 125, 50), 13
-    AddButton ds, ds.Range("D18"), "btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", RGB(30, 136, 229), 11
-    AddButton ds, ds.Range("E18"), "btnClear", "CLEAR FORM", "ClearForm", RGB(120, 144, 156), 11
+    If recreate Then
+        DeleteButtons ds
+        DeleteButtons ss
+    End If
+    If CStr(ds.Range("B18").Value) <> "" Then ds.Range("B18").Value = ""
+    ' New-enrollment buttons (rows 18-19)
+    PlaceButton ds, ds.Range("B18:C19"), "btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", RGB(46, 125, 50), 14
+    PlaceButton ds, ds.Range("D18:D19"), "btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", RGB(30, 136, 229), 10
+    PlaceButton ds, ds.Range("E18:E19"), "btnClear", "CLEAR FORM", "ClearForm", RGB(120, 144, 156), 10
     ' Manage buttons (row 8)
-    AddButton ds, ds.Range("G8:H8"), "btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", RGB(30, 136, 229), 10
-    AddButton ds, ds.Range("I8:J8"), "btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", RGB(198, 40, 40), 10
+    PlaceButton ds, ds.Range("G8:H8"), "btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", RGB(30, 136, 229), 10
+    PlaceButton ds, ds.Range("I8:J8"), "btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", RGB(198, 40, 40), 10
     ' Search button (row 12)
-    AddButton ds, ds.Range("G12:J12"), "btnSearch", "SEARCH STUDENT", "SearchStudent", RGB(0, 137, 123), 10
+    PlaceButton ds, ds.Range("G12:J12"), "btnSearch", "SEARCH STUDENT", "SearchStudent", RGB(0, 137, 123), 10
     ' Back button on search sheet
-    AddButton ss, ss.Range("H3:J3"), "btnBack", "BACK TO DASHBOARD", "GoToDashboard", RGB(55, 71, 79), 9
-
-    ds.Activate
-    Notify "UpKidz Enrollment System installed." & vbCrLf & vbCrLf & _
-           "IMPORTANT: Save the workbook as 'Excel Macro-Enabled Workbook (*.xlsm)' " & _
-           "so the macros and buttons are kept.", vbInformation
+    PlaceButton ss, ss.Range("H3:J3"), "btnBack", "BACK TO DASHBOARD", "GoToDashboard", RGB(55, 71, 79), 9
 End Sub
 
 '==============================================================================
@@ -807,24 +822,36 @@ Private Sub DeleteButtons(ws As Worksheet)
     Next i
 End Sub
 
-Private Sub AddButton(ws As Worksheet, target As Range, shpName As String, caption As String, _
-                      macroName As String, fillColor As Long, fontSize As Single)
-    Dim shp As Shape
-    Set shp = ws.Shapes.AddShape(5, target.Left + 3, target.Top + 2, target.Width - 6, target.Height - 4) ' 5 = rounded rectangle
-    With shp
-        .Name = shpName
-        .OnAction = macroName
-        .Fill.ForeColor.RGB = fillColor
-        .Line.Visible = 0
-        .Placement = 2  ' move but don't size with cells
-        With .TextFrame2
-            .VerticalAnchor = 3                    ' middle
-            .TextRange.Text = caption
-            .TextRange.ParagraphFormat.Alignment = 2 ' center
-            .TextRange.Font.Bold = -1
-            .TextRange.Font.Size = fontSize
-            .TextRange.Font.Name = "Arial"
-            .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
-        End With
-    End With
+Private Function FindShape(ws As Worksheet, shpName As String) As Object
+    Dim i As Long
+    Set FindShape = Nothing
+    For i = 1 To ws.Shapes.Count
+        If ws.Shapes(i).Name = shpName Then
+            Set FindShape = ws.Shapes(i)
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Shapes are late-bound (As Object) so no extra library reference is needed.
+Private Sub PlaceButton(ws As Worksheet, target As Range, shpName As String, caption As String, _
+                        macroName As String, fillColor As Long, fontSize As Single)
+    Dim shp As Object, tf As Object
+    Set shp = FindShape(ws, shpName)
+    If shp Is Nothing Then
+        Set shp = ws.Shapes.AddShape(5, target.Left + 3, target.Top + 2, target.Width - 6, target.Height - 4) ' 5 = rounded rectangle
+        shp.Name = shpName
+        shp.Fill.ForeColor.RGB = fillColor
+        shp.Line.Visible = 0
+        shp.Placement = 2  ' move but don't size with cells
+        Set tf = shp.TextFrame2
+        tf.VerticalAnchor = 3                     ' middle
+        tf.TextRange.Text = caption
+        tf.TextRange.ParagraphFormat.Alignment = 2 ' center
+        tf.TextRange.Font.Bold = -1
+        tf.TextRange.Font.Size = fontSize
+        tf.TextRange.Font.Name = "Arial"
+        tf.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    End If
+    shp.OnAction = macroName
 End Sub
