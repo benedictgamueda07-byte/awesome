@@ -406,17 +406,18 @@ def drawing_xml(anchors):
 
 
 # column widths (index 0 = A) - must match build_workbook.py
-DASH_W = [2, 22, 22, 22, 34, 3, 18, 18, 18, 18, 2]
-SEARCH_W = [13, 20, 6, 26, 30, 11, 12, 13, 14, 11]
+DASH_W = [2, 22, 22, 22, 36, 3, 20, 16, 16, 16, 2]
+SEARCH_W = [11, 26, 13, 13, 22, 11, 11, 34, 12, 12, 10, 11]
 DASH_BUTTONS = [  # name, text, macro, color, size, c1, c2, (row1, row2) 0-based
-    ("btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", "2E7D32", 14, 1, 2, (17, 18)),
-    ("btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", "1E88E5", 10, 3, 3, (17, 18)),
-    ("btnClear", "CLEAR FORM", "ClearForm", "78909C", 10, 4, 4, (17, 18)),
-    ("btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", "1E88E5", 10, 6, 7, (7, 7)),
-    ("btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", "C62828", 10, 8, 9, (7, 7)),
-    ("btnSearch", "SEARCH STUDENT", "SearchStudent", "00897B", 10, 6, 9, (11, 11)),
+    ("btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", "375623", 14, 1, 2, (19, 20)),
+    ("btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", "1F4E78", 10, 3, 3, (19, 20)),
+    ("btnClear", "CLEAR FORM", "ClearForm", "808080", 10, 4, 4, (19, 20)),
+    ("btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", "1F4E78", 10, 6, 7, (7, 7)),
+    ("btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", "C00000", 10, 8, 9, (7, 7)),
+    ("btnSearch", "PROFILE / SEARCH", "SearchStudent", "203764", 10, 6, 7, (11, 11)),
+    ("btnReenroll", "RE-ENROLL", "ReEnrollStudent", "375623", 10, 8, 9, (11, 11)),
 ]
-SEARCH_BUTTONS = [("btnBack", "BACK TO DASHBOARD", "GoToDashboard", "37474F", 9, 7, 9, (2, 2))]
+SEARCH_BUTTONS = [("btnBack", "BACK TO DASHBOARD", "GoToDashboard", "203764", 9, 9, 11, (2, 2))]
 
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 DRAWING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
@@ -505,9 +506,9 @@ def main():
     add_drawing(files, part_of["Student Search"], f"drawing{nxt + 1}.xml",
                 [anchor_xml(i + 1, *b[:5], b[5], b[6], b[7], SEARCH_W) for i, b in enumerate(SEARCH_BUTTONS)])
 
-    # remove the "run InstallUpKidzSystem" placeholder text in Dashboard!B18
+    # remove the "run InstallUpKidzSystem" placeholder text in Dashboard!B20
     dash = files[part_of["Dashboard"]].decode("utf-8")
-    dash = re.sub(r'(<c r="B18"[^>]*?)\s+t="inlineStr"([^>]*)><is><t>[^<]*</t></is></c>', r'\1\2/>', dash)
+    dash = re.sub(r'(<c r="B20"[^>]*?)\s+t="inlineStr"([^>]*)><is><t>[^<]*</t></is></c>', r'\1\2/>', dash)
     files[part_of["Dashboard"]] = dash.encode("utf-8")
 
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as z:
