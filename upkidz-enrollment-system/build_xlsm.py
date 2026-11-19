@@ -409,15 +409,18 @@ def drawing_xml(anchors):
 DASH_W = [2, 22, 22, 22, 36, 3, 20, 16, 16, 16, 2]
 SEARCH_W = [11, 26, 13, 13, 22, 11, 11, 34, 12, 12, 10, 11]
 DASH_BUTTONS = [  # name, text, macro, color, size, c1, c2, (row1, row2) 0-based
-    ("btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", "375623", 14, 1, 2, (19, 20)),
-    ("btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", "1F4E78", 10, 3, 3, (19, 20)),
-    ("btnClear", "CLEAR FORM", "ClearForm", "808080", 10, 4, 4, (19, 20)),
+    ("btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", "375623", 14, 1, 2, (18, 19)),
+    ("btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", "1F4E78", 10, 3, 3, (18, 19)),
+    ("btnClear", "CLEAR FORM", "ClearForm", "808080", 10, 4, 4, (18, 19)),
     ("btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", "1F4E78", 10, 6, 7, (7, 7)),
     ("btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", "C00000", 10, 8, 9, (7, 7)),
     ("btnSearch", "PROFILE / SEARCH", "SearchStudent", "203764", 10, 6, 7, (11, 11)),
     ("btnReenroll", "RE-ENROLL", "ReEnrollStudent", "375623", 10, 8, 9, (11, 11)),
 ]
 SEARCH_BUTTONS = [("btnBack", "BACK TO DASHBOARD", "GoToDashboard", "203764", 9, 9, 11, (2, 2))]
+CARRY_W = [16, 11, 26, 22, 11, 11, 11, 11, 12, 11, 12, 12, 30, 11, 12, 11, 16, 30]
+EOY_BUTTONS = [("btnRefreshEoy", "REFRESH LIST", "RefreshEndOfYear", "1F4E78", 10, 14, 16, (2, 2))]
+BOY_BUTTONS = [("btnImport", "IMPORT CARRY-OVER", "ImportCarryOver", "375623", 11, 14, 17, (2, 2))]
 
 NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 DRAWING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
@@ -505,10 +508,14 @@ def main():
                 [anchor_xml(i + 1, *b[:5], b[5], b[6], b[7], DASH_W) for i, b in enumerate(DASH_BUTTONS)])
     add_drawing(files, part_of["Student Search"], f"drawing{nxt + 1}.xml",
                 [anchor_xml(i + 1, *b[:5], b[5], b[6], b[7], SEARCH_W) for i, b in enumerate(SEARCH_BUTTONS)])
+    add_drawing(files, part_of["End of Year"], f"drawing{nxt + 2}.xml",
+                [anchor_xml(i + 1, *b[:5], b[5], b[6], b[7], CARRY_W) for i, b in enumerate(EOY_BUTTONS)])
+    add_drawing(files, part_of["Beginning of Year"], f"drawing{nxt + 3}.xml",
+                [anchor_xml(i + 1, *b[:5], b[5], b[6], b[7], CARRY_W) for i, b in enumerate(BOY_BUTTONS)])
 
-    # remove the "run InstallUpKidzSystem" placeholder text in Dashboard!B20
+    # remove the "run InstallUpKidzSystem" placeholder text in Dashboard!B19
     dash = files[part_of["Dashboard"]].decode("utf-8")
-    dash = re.sub(r'(<c r="B20"[^>]*?)\s+t="inlineStr"([^>]*)><is><t>[^<]*</t></is></c>', r'\1\2/>', dash)
+    dash = re.sub(r'(<c r="B19"[^>]*?)\s+t="inlineStr"([^>]*)><is><t>[^<]*</t></is></c>', r'\1\2/>', dash)
     files[part_of["Dashboard"]] = dash.encode("utf-8")
 
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED) as z:

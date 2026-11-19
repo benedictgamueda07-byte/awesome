@@ -12,6 +12,8 @@ Attribute VB_Name = "UpKidzEnrollment"
 '    SearchStudent         - show a student's profile (all enrollments)
 '    ReEnrollStudent       - fill the form for a returning student
 '    GoToDashboard         - navigation
+'    RefreshEndOfYear      - rebuild the End of Year carry-over list
+'    ImportCarryOver       - (next year's workbook) import pasted carry-over rows
 '    InstallUpKidzSystem   - redraw all buttons
 '    EnsureButtons         - runs on open (re-links / adds buttons)
 '
@@ -48,15 +50,24 @@ Private Const LC_NAME As Long = 7
 Private Const LC_PACKAGE As Long = 8
 Private Const LC_MONTHS As Long = 9
 Private Const LC_START As Long = 10
-Private Const LC_COVERED As Long = 11
-Private Const LC_FEE As Long = 12
-Private Const LC_DISCOUNT As Long = 13
-Private Const LC_NET As Long = 14
-Private Const LC_PERMONTH As Long = 15
-Private Const LC_STATUS As Long = 16
-Private Const LC_DROP As Long = 17
-Private Const LC_UPDATED As Long = 18
-Private Const LC_REMARKS As Long = 19
+Private Const LC_STARTYEAR As Long = 11
+Private Const LC_COVERED As Long = 12       ' months in THIS workbook's year
+Private Const LC_NEXTYEAR As Long = 13      ' months that fall in next year
+Private Const LC_FEE As Long = 14
+Private Const LC_DISCOUNT As Long = 15
+Private Const LC_NET As Long = 16
+Private Const LC_PERMONTH As Long = 17
+Private Const LC_STATUS As Long = 18
+Private Const LC_DROP As Long = 19          ' last month attended (dropped)
+Private Const LC_DROPYEAR As Long = 20
+Private Const LC_UPDATED As Long = 21
+Private Const LC_REMARKS As Long = 22
+
+' End of Year / Beginning of Year carry-over sheets
+Private Const SH_EOY As String = "End of Year"
+Private Const SH_BOY As String = "Beginning of Year"
+Private Const CARRY_FIRST As Long = 9
+Private Const CARRY_LAST As Long = 208
 
 Private Const APP_TITLE As String = "UpKidz Enrollment System"
 
@@ -72,7 +83,10 @@ Private fDiscount As Double
 Private fNet As Double
 Private fPerMonth As Double
 Private fStatus As String         ' "Active" or "Dropped"
-Private fDropMonth As Long        ' 0 = not dropped
+Private fDropMonth As Long        ' last month attended (0 = not dropped)
+Private fDropPos As Long          ' its position in the package (-1 = none)
+Private fDropYear As Long
+Private fStartOffset As Long      ' start year - this workbook's school year (0 or -1)
 
 '---- test hook: when True, prompts are auto-answered and messages are stored -
 Public gSilent As Boolean
@@ -83,18 +97,19 @@ Public gLastMessage As String
 '  PUBLIC MACROS
 '==============================================================================
 Public Sub SubmitEnrollment()
-    Dim months As Variant, newID As String, sid As String, isReturning As Boolean, msg As String
+    Dim months As Variant, nextM As Variant, newID As String, sid As String, isReturning As Boolean, msg As String
 
-    If Len(CStr(Range("inEditID").Value)) > 0 Then
-        Notify "You are editing enrollment " & Range("inEditID").Value & "." & vbCrLf & _
+    If Len(CStr(SafeGet("inEditID"))) > 0 Then
+        Notify "You are editing enrollment " & SafeGet("inEditID") & "." & vbCrLf & _
                "Click UPDATE ENROLLMENT to save the changes, or CLEAR FORM to start a new enrollment.", vbExclamation
         Exit Sub
     End If
     If Not ReadForm(False) Then Exit Sub
-    months = CoveredMonths(fStartMonth, fMonths)
+    months = ThisYearList(fMonths)
+    nextM = NextYearList(fMonths)
 
     If Not CheckDuplicates(months, "") Then Exit Sub
-    If Not CheckCapacity(months, "") Then Exit Sub
+    If Not CheckCapacity(months, "", False) Then Exit Sub
 
     sid = FindStudentID(fName)
     isReturning = (sid <> "")
@@ -103,7 +118,7 @@ Public Sub SubmitEnrollment()
         msg = msg & "RE-ENROLLMENT of returning student " & sid & vbCrLf & _
               "Previous: " & LastEnrollmentText(sid) & vbCrLf & vbCrLf
     End If
-    msg = msg & FormSummary(months) & vbCrLf & "Submit now?"
+    msg = msg & FormSummary(months, nextM) & vbCrLf & "Submit now?"
     If Ask(msg, vbYesNo + vbQuestion) <> vbYes Then Exit Sub
 
     On Error GoTo Fail
@@ -111,7 +126,8 @@ Public Sub SubmitEnrollment()
     If Not isReturning Then sid = NextStudentID()
     newID = NextEnrollmentID()
     WriteToMonths months, newID
-    LogNew newID, sid, IIf(isReturning, "Re-enrollment", "New"), months
+    LogNew newID, sid, IIf(isReturning, "Re-enrollment", "New"), months, nextM, Now
+    RefreshEndOfYear
     Application.ScreenUpdating = True
 
     ClearInputs
@@ -120,7 +136,8 @@ Public Sub SubmitEnrollment()
            "Student ID: " & sid & vbCrLf & _
            "Student: " & fName & vbCrLf & _
            "Program: " & fProgram & " (" & SectionTitle(fSection) & ")" & vbCrLf & _
-           "Added to: " & MonthListText(months), vbInformation
+           "Added to: " & ListOrNone(months) & _
+           IIf(ArrLen(nextM) > 0, vbCrLf & "Next year (End of Year sheet): " & ListOrNone(nextM), ""), vbInformation
     Exit Sub
 Fail:
     Application.ScreenUpdating = True
@@ -136,7 +153,7 @@ Public Sub LoadEnrollmentForEdit()
     Dim id As String, r As Long, lg As Worksheet
     id = UCase$(Trim$(CStr(SafeGet("inManageID"))))
     If id = "" Then
-        Notify "Type the Enrollment ID (e.g. UPK-0001) in the Enrollment ID box first.", vbExclamation
+        Notify "Type the Enrollment ID (e.g. UPK-2026-0001) in the Enrollment ID box first.", vbExclamation
         Exit Sub
     End If
     r = FindLogRow(id)
@@ -161,12 +178,12 @@ Public Sub LoadEnrollmentForEdit()
     SafeSet "inManageID", id
     Notify "Enrollment " & id & " loaded." & vbCrLf & vbCrLf & _
            "Change any field, then click UPDATE ENROLLMENT." & vbCrLf & _
-           "To record a drop: set Enrollment Status = Dropped and choose the Drop Month " & _
-           "(the student is removed from that month onward).", vbInformation
+           "If the student stopped: set Enrollment Status = Dropped and choose the LAST MONTH ATTENDED. " & _
+           "The student stays in that month and is removed from the following months.", vbInformation
 End Sub
 
 Public Sub UpdateEnrollment()
-    Dim id As String, r As Long, months As Variant, attended As Variant, removed As Long, msg As String
+    Dim id As String, r As Long, months As Variant, nextM As Variant, n As Long, removed As Long, msg As String
     id = CStr(SafeGet("inEditID"))
     If id = "" Then
         Notify "No enrollment is loaded for editing." & vbCrLf & _
@@ -179,17 +196,18 @@ Public Sub UpdateEnrollment()
         Exit Sub
     End If
     If Not ReadForm(True) Then Exit Sub
-    months = CoveredMonths(fStartMonth, fMonths)
-    attended = AttendedMonths(months)
-    If ArrLen(attended) > 0 Then
-        If Not CheckDuplicates(attended, id) Then Exit Sub
-        If Not CheckCapacity(attended, id) Then Exit Sub
+    n = AttendedCount()
+    months = ThisYearList(n)
+    nextM = NextYearList(n)
+    If ArrLen(months) > 0 Then
+        If Not CheckDuplicates(months, id) Then Exit Sub
+        If Not CheckCapacity(months, id, False) Then Exit Sub
     End If
 
-    msg = "Update enrollment " & id & "?" & vbCrLf & vbCrLf & FormSummary(months) & vbCrLf
+    msg = "Update enrollment " & id & "?" & vbCrLf & vbCrLf & FormSummary(months, nextM) & vbCrLf
     If fStatus = "Dropped" Then
-        msg = msg & "DROPPED from " & MonthSheet(fDropMonth) & ": the student will appear only in " & _
-              IIf(ArrLen(attended) = 0, "(no months)", MonthListText(attended)) & "." & vbCrLf
+        msg = msg & "DROPPED - last month attended: " & MonthSheet(fDropMonth) & " " & fDropYear & "." & vbCrLf & _
+              "The student is removed from the months after it." & vbCrLf
     End If
     msg = msg & "The old entries will be replaced in every month."
     If Ask(msg, vbYesNo + vbQuestion) <> vbYes Then Exit Sub
@@ -197,15 +215,18 @@ Public Sub UpdateEnrollment()
     On Error GoTo Fail
     Application.ScreenUpdating = False
     removed = RemoveFromMonths(id)
-    If ArrLen(attended) > 0 Then WriteToMonths attended, id
-    LogUpdate r, attended
+    If ArrLen(months) > 0 Then WriteToMonths months, id
+    LogUpdate r, months, nextM
+    RefreshEndOfYear
     Application.ScreenUpdating = True
 
     ClearInputs
     SafeSet "inEditID", ""
-    Notify "Enrollment " & id & " updated" & IIf(fStatus = "Dropped", " (DROPPED from " & MonthSheet(fDropMonth) & ")", "") & "." & vbCrLf & _
+    Notify "Enrollment " & id & " updated" & _
+           IIf(fStatus = "Dropped", " (DROPPED - last month attended " & MonthSheet(fDropMonth) & ")", "") & "." & vbCrLf & _
            "Old entries removed: " & removed & vbCrLf & _
-           "Now recorded in: " & IIf(ArrLen(attended) = 0, "(no months)", MonthListText(attended)), vbInformation
+           "Now recorded in: " & ListOrNone(months) & _
+           IIf(ArrLen(nextM) > 0, vbCrLf & "Next year (End of Year sheet): " & ListOrNone(nextM), ""), vbInformation
     Exit Sub
 Fail:
     Application.ScreenUpdating = True
@@ -232,7 +253,7 @@ Public Sub CancelEnrollment()
     End If
     If Ask("Cancel this enrollment (entered by mistake)?" & vbCrLf & vbCrLf & _
            "ID: " & id & vbCrLf & "Student: " & lg.Cells(r, LC_NAME).Value & vbCrLf & _
-           "Program: " & lg.Cells(r, LC_PROGRAM).Value & vbCrLf & "Months: " & lg.Cells(r, LC_COVERED).Value & _
+           "Program: " & lg.Cells(r, LC_PROGRAM).Value & vbCrLf & "Months: " & CoveredText(r) & _
            vbCrLf & vbCrLf & "The student will be removed from every month listed." & vbCrLf & _
            "(If the student stopped attending, use Status = Dropped with UPDATE instead.)", _
            vbYesNo + vbExclamation + vbDefaultButton2) <> vbYes Then Exit Sub
@@ -243,6 +264,7 @@ Public Sub CancelEnrollment()
     lg.Cells(r, LC_STATUS).Value = "Cancelled"
     lg.Cells(r, LC_UPDATED).Value = Now
     lg.Cells(r, LC_REMARKS).Value = Trim$(lg.Cells(r, LC_REMARKS).Value & " Cancelled " & Format$(Now, "yyyy-mm-dd") & ".")
+    RefreshEndOfYear
     Application.ScreenUpdating = True
 
     If CStr(SafeGet("inEditID")) = id Then
@@ -285,7 +307,7 @@ Public Sub SearchStudent()
                 ss.Cells(outR, 5).Value = lg.Cells(r, LC_PROGRAM).Value
                 ss.Cells(outR, 6).Value = lg.Cells(r, LC_PACKAGE).Value
                 ss.Cells(outR, 7).Value = lg.Cells(r, LC_START).Value
-                ss.Cells(outR, 8).Value = lg.Cells(r, LC_COVERED).Value
+                ss.Cells(outR, 8).Value = CoveredText(r)
                 ss.Cells(outR, 9).Value = lg.Cells(r, LC_NET).Value
                 ss.Cells(outR, 10).Value = lg.Cells(r, LC_PERMONTH).Value
                 ss.Cells(outR, 11).Value = lg.Cells(r, LC_STATUS).Value
@@ -382,29 +404,35 @@ Public Sub EnsureButtons()
 End Sub
 
 Private Sub BuildButtons(recreate As Boolean)
-    Dim ds As Worksheet, ss As Worksheet
+    Dim ds As Worksheet, ss As Worksheet, eo As Worksheet, bo As Worksheet
     Set ds = Worksheets(SH_DASH)
     Set ss = Worksheets(SH_SEARCH)
+    Set eo = Worksheets(SH_EOY)
+    Set bo = Worksheets(SH_BOY)
     If recreate Then
         DeleteButtons ds
         DeleteButtons ss
+        DeleteButtons eo
+        DeleteButtons bo
     End If
-    If CStr(ds.Range("B20").Value) <> "" Then ds.Range("B20").Value = ""
-    PlaceButton ds, ds.Range("B20:C21"), "btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", RGB(55, 86, 35), 14
-    PlaceButton ds, ds.Range("D20:D21"), "btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", RGB(31, 78, 120), 10
-    PlaceButton ds, ds.Range("E20:E21"), "btnClear", "CLEAR FORM", "ClearForm", RGB(128, 128, 128), 10
+    If CStr(ds.Range("B19").Value) <> "" Then ds.Range("B19").Value = ""
+    PlaceButton ds, ds.Range("B19:C20"), "btnSubmit", "SUBMIT ENROLLMENT", "SubmitEnrollment", RGB(55, 86, 35), 14
+    PlaceButton ds, ds.Range("D19:D20"), "btnUpdate", "UPDATE ENROLLMENT", "UpdateEnrollment", RGB(31, 78, 120), 10
+    PlaceButton ds, ds.Range("E19:E20"), "btnClear", "CLEAR FORM", "ClearForm", RGB(128, 128, 128), 10
     PlaceButton ds, ds.Range("G8:H8"), "btnLoad", "LOAD FOR EDIT", "LoadEnrollmentForEdit", RGB(31, 78, 120), 10
     PlaceButton ds, ds.Range("I8:J8"), "btnCancel", "CANCEL ENROLLMENT", "CancelEnrollment", RGB(192, 0, 0), 10
     PlaceButton ds, ds.Range("G12:H12"), "btnSearch", "PROFILE / SEARCH", "SearchStudent", RGB(32, 55, 100), 10
     PlaceButton ds, ds.Range("I12:J12"), "btnReenroll", "RE-ENROLL", "ReEnrollStudent", RGB(55, 86, 35), 10
     PlaceButton ss, ss.Range("J3:L3"), "btnBack", "BACK TO DASHBOARD", "GoToDashboard", RGB(32, 55, 100), 9
+    PlaceButton eo, eo.Range("O3:Q3"), "btnRefreshEoy", "REFRESH LIST", "RefreshEndOfYear", RGB(31, 78, 120), 10
+    PlaceButton bo, bo.Range("O3:R3"), "btnImport", "IMPORT CARRY-OVER", "ImportCarryOver", RGB(55, 86, 35), 11
 End Sub
 
 '==============================================================================
 '  FORM READING & VALIDATION
 '==============================================================================
 Private Function ReadForm(isEdit As Boolean) As Boolean
-    Dim v As Variant, problems As String, months As Variant, i As Long, inside As Boolean
+    Dim v As Variant, problems As String, i As Long, r As Long, lg As Worksheet, useHist As Boolean
 
     ReadForm = False
     fProgram = CleanText(CStr(SafeGet("inProgram")))
@@ -414,6 +442,27 @@ Private Function ReadForm(isEdit As Boolean) As Boolean
     fStatus = IIf(LCase$(Trim$(CStr(SafeGet("inStatus")))) = "dropped", "Dropped", "Active")
     fDropMonth = MonthIndex(CStr(SafeGet("inDropMonth")))
     fSection = ProgramSection(fProgram)
+    fStartOffset = 0
+    fDropPos = -1
+    fDropYear = 0
+    useHist = False
+    If isEdit Then
+        r = FindLogRow(CStr(SafeGet("inEditID")))
+        If r > 0 Then
+            Set lg = Worksheets(SH_LOG)
+            If IsNumeric(lg.Cells(r, LC_STARTYEAR).Value) And CStr(lg.Cells(r, LC_STARTYEAR).Value) <> "" Then
+                fStartOffset = CLng(lg.Cells(r, LC_STARTYEAR).Value) - SchoolYear()
+            End If
+            ' same program + package as recorded: keep the original price (price list may have changed)
+            If StrComp(CleanText(CStr(lg.Cells(r, LC_PROGRAM).Value)), fProgram, vbTextCompare) = 0 And _
+               StrComp(CleanText(CStr(lg.Cells(r, LC_PACKAGE).Value)), fPackage, vbTextCompare) = 0 And _
+               IsNumeric(lg.Cells(r, LC_MONTHS).Value) And IsNumeric(lg.Cells(r, LC_FEE).Value) Then
+                fMonths = CLng(lg.Cells(r, LC_MONTHS).Value)
+                fFee = CDbl(lg.Cells(r, LC_FEE).Value)
+                useHist = (fMonths > 0 And fFee > 0)
+            End If
+        End If
+    End If
 
     If fProgram = "" Then
         problems = problems & "- Select a Program." & vbCrLf
@@ -434,7 +483,7 @@ Private Function ReadForm(isEdit As Boolean) As Boolean
         problems = problems & "- Discount must be a number (leave blank if none)." & vbCrLf
     End If
 
-    If problems = "" Then
+    If problems = "" And Not useHist Then
         If Not LookupPackage(fProgram, fPackage, fMonths, fFee) Then
             problems = problems & "- Package '" & fPackage & "' is not listed for " & fProgram & " on the Settings sheet." & vbCrLf
         ElseIf fMonths < 1 Or fMonths > 12 Then
@@ -449,7 +498,7 @@ Private Function ReadForm(isEdit As Boolean) As Boolean
             problems = problems & "- Status 'Dropped' is only used when updating an enrollment. " & _
                        "Set Enrollment Status to Active (or blank) for a new enrollment." & vbCrLf
         ElseIf fDropMonth = 0 Then
-            problems = problems & "- Select the Drop Month (first month the student no longer attends)." & vbCrLf
+            problems = problems & "- Select the Last Month Attended." & vbCrLf
         End If
     Else
         fDropMonth = 0
@@ -468,45 +517,28 @@ Private Function ReadForm(isEdit As Boolean) As Boolean
     fPerMonth = Round(fNet / fMonths, 2)
 
     If fDropMonth > 0 Then
-        months = CoveredMonths(fStartMonth, fMonths)
-        inside = False
-        For i = LBound(months) To UBound(months)
-            If months(i) = fDropMonth Then inside = True
+        For i = 0 To fMonths - 1
+            If SeqMonth(i) = fDropMonth Then fDropPos = i
         Next i
-        If Not inside Then
-            Notify "Drop Month " & MonthSheet(fDropMonth) & " is outside this enrollment (" & _
-                   MonthListText(months) & ")." & vbCrLf & "Choose one of the covered months.", vbExclamation
+        If fDropPos < 0 Then
+            Notify "Last Month Attended (" & MonthSheet(fDropMonth) & ") is not part of this enrollment (" & _
+                   FullSequenceText() & ")." & vbCrLf & "Choose one of the covered months.", vbExclamation
             Exit Function
         End If
-        If fDropMonth = fStartMonth Then
-            If Ask("The Drop Month is the Start Month, so the student will be removed from ALL months " & _
-                   "of this enrollment. Continue?", vbYesNo + vbQuestion + vbDefaultButton2) <> vbYes Then Exit Function
+        If SeqYearOffset(fDropPos) < 0 Then
+            Notify MonthSheet(fDropMonth) & " belongs to LAST year's part of this enrollment." & vbCrLf & _
+                   "Record that drop in last year's workbook, or choose a month of this year.", vbExclamation
+            Exit Function
         End If
+        If fDropPos = fMonths - 1 Then
+            Notify MonthSheet(fDropMonth) & " is already the final month of this package, so the student " & _
+                   "completes the package normally - no drop is needed." & vbCrLf & _
+                   "Set Enrollment Status back to Active.", vbExclamation
+            Exit Function
+        End If
+        fDropYear = SchoolYear() + SeqYearOffset(fDropPos)
     End If
     ReadForm = True
-End Function
-
-' Months actually attended: the covered months before the drop month
-Private Function AttendedMonths(months As Variant) As Variant
-    Dim a() As Long, n As Long, i As Long
-    If fDropMonth = 0 Then
-        AttendedMonths = months
-        Exit Function
-    End If
-    n = 0
-    For i = LBound(months) To UBound(months)
-        If months(i) = fDropMonth Then Exit For
-        n = n + 1
-    Next i
-    If n = 0 Then
-        AttendedMonths = Array()
-    Else
-        ReDim a(1 To n)
-        For i = 1 To n
-            a(i) = months(LBound(months) + i - 1)
-        Next i
-        AttendedMonths = a
-    End If
 End Function
 
 ' Warns if the same student is already in this section in any target month
@@ -539,7 +571,7 @@ Private Function CheckDuplicates(months As Variant, excludeID As String) As Bool
 End Function
 
 ' Every target month must have a free row BEFORE anything is written
-Private Function CheckCapacity(months As Variant, excludeID As String) As Boolean
+Private Function CheckCapacity(months As Variant, excludeID As String, quiet As Boolean) As Boolean
     Dim i As Long, r As Long, ws As Worksheet, ic As Long, freeRows As Long, full As String
     ic = SecIdCol(fSection)
     For i = LBound(months) To UBound(months)
@@ -557,8 +589,8 @@ Private Function CheckCapacity(months As Variant, excludeID As String) As Boolea
     If full = "" Then
         CheckCapacity = True
     Else
-        Notify "No free rows left in " & SectionTitle(fSection) & " for: " & Left$(full, Len(full) - 2) & "." & _
-               vbCrLf & "Nothing was saved.", vbCritical
+        gLastMessage = "No free rows left in " & SectionTitle(fSection) & " for: " & Left$(full, Len(full) - 2) & "."
+        If Not quiet Then Notify gLastMessage & vbCrLf & "Nothing was saved.", vbCritical
         CheckCapacity = False
     End If
 End Function
@@ -670,12 +702,18 @@ End Function
 '==============================================================================
 '  ENROLLMENT HISTORY / STUDENT PROFILES
 '==============================================================================
+' IDs include the school year (UPK-2026-0001, STU-2026-0001) so they stay
+' unique when carry-over rows move between yearly workbooks.
 Private Function NextEnrollmentID() As String
-    NextEnrollmentID = "UPK-" & Format$(MaxIdNumber(LC_EID, "UPK-") + 1, "0000")
+    Dim pre As String
+    pre = "UPK-" & SchoolYear() & "-"
+    NextEnrollmentID = pre & Format$(MaxIdNumber(LC_EID, pre) + 1, "0000")
 End Function
 
 Private Function NextStudentID() As String
-    NextStudentID = "STU-" & Format$(MaxIdNumber(LC_SID, "STU-") + 1, "0000")
+    Dim pre As String
+    pre = "STU-" & SchoolYear() & "-"
+    NextStudentID = pre & Format$(MaxIdNumber(LC_SID, pre) + 1, "0000")
 End Function
 
 Private Function MaxIdNumber(col As Long, prefix As String) As Long
@@ -780,24 +818,27 @@ Private Function LastEnrollmentRow(ByVal sid As String) As Long
 End Function
 
 Private Function LastEnrollmentText(ByVal sid As String) As String
-    Dim r As Long, lg As Worksheet
+    Dim r As Long, lg As Worksheet, cov As String
     r = LastEnrollmentRow(sid)
     If r = 0 Then Exit Function
     Set lg = Worksheets(SH_LOG)
+    cov = CoveredText(r)
     LastEnrollmentText = lg.Cells(r, LC_PROGRAM).Value & " " & lg.Cells(r, LC_PACKAGE).Value & ", " & _
-        IIf(CStr(lg.Cells(r, LC_COVERED).Value) = "", "(no months)", MonthRangeText(CStr(lg.Cells(r, LC_COVERED).Value))) & _
+        IIf(cov = "", "(no months)", MonthRangeText(Replace(cov, " (next year)", ""))) & _
         " [" & lg.Cells(r, LC_STATUS).Value & "]"
 End Function
 
 ' Month after the last month the student attended in that enrollment
 Private Function NextMonthAfter(r As Long) As Long
-    Dim cov As String, parts As Variant, m As Long
-    cov = CStr(Worksheets(SH_LOG).Cells(r, LC_COVERED).Value)
+    Dim cov As String, parts As Variant, m As Long, lg As Worksheet
+    Set lg = Worksheets(SH_LOG)
+    cov = CStr(lg.Cells(r, LC_NEXTYEAR).Value)
+    If cov = "" Then cov = CStr(lg.Cells(r, LC_COVERED).Value)
     If cov <> "" Then
         parts = Split(cov, ",")
         m = MonthIndex(Trim$(CStr(parts(UBound(parts)))))
     Else
-        m = MonthIndex(CStr(Worksheets(SH_LOG).Cells(r, LC_START).Value)) - 1
+        m = MonthIndex(CStr(lg.Cells(r, LC_START).Value)) - 1
         If m = 0 Then m = 12
     End If
     If m = 0 Then
@@ -807,31 +848,36 @@ Private Function NextMonthAfter(r As Long) As Long
     End If
 End Function
 
-Private Sub LogNew(ByVal id As String, ByVal sid As String, ByVal kind As String, months As Variant)
+Private Sub LogNew(ByVal id As String, ByVal sid As String, ByVal kind As String, months As Variant, _
+                   nextM As Variant, ByVal submitted As Variant)
     Dim lg As Worksheet, r As Long
     Set lg = Worksheets(SH_LOG)
     r = NextLogRow()
     lg.Cells(r, LC_EID).Value = id
     lg.Cells(r, LC_SID).Value = sid
-    lg.Cells(r, LC_DATE).Value = Now
+    lg.Cells(r, LC_DATE).Value = submitted
     lg.Cells(r, LC_TYPE).Value = kind
-    WriteLogDetails r, months
-    lg.Cells(r, LC_REMARKS).Value = IIf(kind = "New", "Submitted.", "Re-enrolled.")
+    WriteLogDetails r, months, nextM
+    Select Case kind
+        Case "New": lg.Cells(r, LC_REMARKS).Value = "Submitted."
+        Case "Re-enrollment": lg.Cells(r, LC_REMARKS).Value = "Re-enrolled."
+        Case Else: lg.Cells(r, LC_REMARKS).Value = "Carried over from " & (SchoolYear() + fStartOffset) & " on " & Format$(Now, "yyyy-mm-dd") & "."
+    End Select
 End Sub
 
-Private Sub LogUpdate(r As Long, attended As Variant)
+Private Sub LogUpdate(r As Long, months As Variant, nextM As Variant)
     Dim lg As Worksheet
     Set lg = Worksheets(SH_LOG)
-    WriteLogDetails r, attended
+    WriteLogDetails r, months, nextM
     If fStatus = "Dropped" Then
-        lg.Cells(r, LC_REMARKS).Value = Trim$(lg.Cells(r, LC_REMARKS).Value & " Dropped from " & _
-            MonthSheet(fDropMonth) & " (" & Format$(Now, "yyyy-mm-dd") & ").")
+        lg.Cells(r, LC_REMARKS).Value = Trim$(lg.Cells(r, LC_REMARKS).Value & " Dropped - last month " & _
+            MonthSheet(fDropMonth) & " " & fDropYear & " (" & Format$(Now, "yyyy-mm-dd") & ").")
     Else
         lg.Cells(r, LC_REMARKS).Value = Trim$(lg.Cells(r, LC_REMARKS).Value & " Edited " & Format$(Now, "yyyy-mm-dd") & ".")
     End If
 End Sub
 
-Private Sub WriteLogDetails(r As Long, attended As Variant)
+Private Sub WriteLogDetails(r As Long, months As Variant, nextM As Variant)
     Dim lg As Worksheet
     Set lg = Worksheets(SH_LOG)
     lg.Cells(r, LC_PROGRAM).Value = fProgram
@@ -840,15 +886,279 @@ Private Sub WriteLogDetails(r As Long, attended As Variant)
     lg.Cells(r, LC_PACKAGE).Value = fPackage
     lg.Cells(r, LC_MONTHS).Value = fMonths
     lg.Cells(r, LC_START).Value = MonthSheet(fStartMonth)
-    lg.Cells(r, LC_COVERED).Value = IIf(ArrLen(attended) = 0, "", MonthListText(attended))
+    lg.Cells(r, LC_STARTYEAR).Value = SchoolYear() + fStartOffset
+    lg.Cells(r, LC_COVERED).Value = IIf(ArrLen(months) = 0, "", MonthListText(months))
+    lg.Cells(r, LC_NEXTYEAR).Value = IIf(ArrLen(nextM) = 0, "", MonthListText(nextM))
     lg.Cells(r, LC_FEE).Value = fFee
     lg.Cells(r, LC_DISCOUNT).Value = fDiscount
     lg.Cells(r, LC_NET).Value = fNet
     lg.Cells(r, LC_PERMONTH).Value = fPerMonth
     lg.Cells(r, LC_STATUS).Value = fStatus
     lg.Cells(r, LC_DROP).Value = IIf(fDropMonth > 0, MonthSheet(fDropMonth), "")
+    lg.Cells(r, LC_DROPYEAR).Value = IIf(fDropMonth > 0, fDropYear, "")
     lg.Cells(r, LC_UPDATED).Value = Now
 End Sub
+
+'==============================================================================
+'  YEAR-END CARRY-OVER
+'==============================================================================
+' Rebuilds the End of Year sheet from Enrollment History: every enrollment
+' (not cancelled) that still has months in NEXT year.
+Public Sub RefreshEndOfYear()
+    Dim eo As Worksheet, lg As Worksheet, r As Long, outR As Long
+    On Error GoTo Done
+    Set eo = Worksheets(SH_EOY)
+    Set lg = Worksheets(SH_LOG)
+    eo.Range(eo.Cells(CARRY_FIRST, 1), eo.Cells(CARRY_LAST, 17)).ClearContents
+    outR = CARRY_FIRST
+    For r = LOG_FIRST_ROW To LOG_LAST_ROW
+        If CStr(lg.Cells(r, LC_EID).Value) = "" Then Exit For
+        If CStr(lg.Cells(r, LC_STATUS).Value) <> "Cancelled" And CStr(lg.Cells(r, LC_NEXTYEAR).Value) <> "" _
+           And outR <= CARRY_LAST Then
+            eo.Cells(outR, 1).Value = lg.Cells(r, LC_EID).Value
+            eo.Cells(outR, 2).Value = lg.Cells(r, LC_SID).Value
+            eo.Cells(outR, 3).Value = lg.Cells(r, LC_NAME).Value
+            eo.Cells(outR, 4).Value = lg.Cells(r, LC_PROGRAM).Value
+            eo.Cells(outR, 5).Value = lg.Cells(r, LC_PACKAGE).Value
+            eo.Cells(outR, 6).Value = lg.Cells(r, LC_MONTHS).Value
+            eo.Cells(outR, 7).Value = lg.Cells(r, LC_START).Value
+            eo.Cells(outR, 8).Value = lg.Cells(r, LC_STARTYEAR).Value
+            eo.Cells(outR, 9).Value = lg.Cells(r, LC_FEE).Value
+            eo.Cells(outR, 10).Value = lg.Cells(r, LC_DISCOUNT).Value
+            eo.Cells(outR, 11).Value = lg.Cells(r, LC_NET).Value
+            eo.Cells(outR, 12).Value = lg.Cells(r, LC_PERMONTH).Value
+            eo.Cells(outR, 13).Value = lg.Cells(r, LC_NEXTYEAR).Value
+            eo.Cells(outR, 14).Value = lg.Cells(r, LC_STATUS).Value
+            eo.Cells(outR, 15).Value = lg.Cells(r, LC_DROP).Value
+            eo.Cells(outR, 16).Value = lg.Cells(r, LC_DROPYEAR).Value
+            eo.Cells(outR, 17).Value = lg.Cells(r, LC_DATE).Value
+            outR = outR + 1
+        End If
+    Next r
+Done:
+End Sub
+
+' Next year's workbook: adds the pasted carry-over rows to this year's
+' monthly sheets and Enrollment History. Safe to run more than once.
+Public Sub ImportCarryOver()
+    Dim bo As Worksheet, r As Long, n As Long, nOk As Long, nSkip As Long, nErr As Long
+    Dim yrs As String, yr As Variant, eid As String, sid As String, existing As String
+    Dim months As Variant, i As Long, res As String, k As Long
+
+    Set bo = Worksheets(SH_BOY)
+    For r = CARRY_FIRST To CARRY_LAST
+        If Trim$(CStr(bo.Cells(r, 1).Value)) <> "" Then
+            n = n + 1
+            yr = bo.Cells(r, 8).Value
+            If IsNumeric(yr) And CStr(yr) <> "" Then
+                If CLng(yr) <> SchoolYear() - 1 And InStr(yrs, "|" & yr & "|") = 0 Then yrs = yrs & "|" & yr & "|"
+            End If
+        End If
+    Next r
+    If n = 0 Then
+        Notify "Nothing to import." & vbCrLf & vbCrLf & _
+               "Paste LAST year's End of Year rows at cell A9 of this sheet, then click IMPORT CARRY-OVER.", vbExclamation
+        Exit Sub
+    End If
+    If yrs <> "" Then
+        If Ask("Some rows started in " & Replace(Replace(Mid$(yrs, 2, Len(yrs) - 2), "||", ", "), "|", "") & _
+               ", but this workbook's School Year is " & SchoolYear() & " (Settings!B2)." & vbCrLf & _
+               "Carry-over rows normally come from " & (SchoolYear() - 1) & "." & vbCrLf & vbCrLf & _
+               "Import anyway?", vbYesNo + vbExclamation + vbDefaultButton2) <> vbYes Then Exit Sub
+    End If
+    If Ask("Import " & n & " carry-over row(s) into " & SchoolYear() & "?", vbYesNo + vbQuestion) <> vbYes Then Exit Sub
+
+    On Error GoTo Fail
+    Application.ScreenUpdating = False
+    For r = CARRY_FIRST To CARRY_LAST
+        eid = UCase$(Trim$(CStr(bo.Cells(r, 1).Value)))
+        If eid <> "" And Left$(CStr(bo.Cells(r, 18).Value), 8) = "Imported" Then
+            nSkip = nSkip + 1                       ' imported earlier - keep its note
+        ElseIf eid <> "" Then
+            res = ""
+            If FindLogRow(eid) > 0 Then
+                res = "Skipped - already in Enrollment History"
+                nSkip = nSkip + 1
+            Else
+                fName = CleanText(CStr(bo.Cells(r, 3).Value))
+                fProgram = CleanText(CStr(bo.Cells(r, 4).Value))
+                fPackage = CleanText(CStr(bo.Cells(r, 5).Value))
+                fMonths = CLng(Val(CStr(bo.Cells(r, 6).Value)))
+                fStartMonth = MonthIndex(CStr(bo.Cells(r, 7).Value))
+                fStartOffset = CLng(Val(CStr(bo.Cells(r, 8).Value))) - SchoolYear()
+                fFee = Val(CStr(bo.Cells(r, 9).Value))
+                fDiscount = Val(CStr(bo.Cells(r, 10).Value))
+                fNet = Val(CStr(bo.Cells(r, 11).Value))
+                fPerMonth = Val(CStr(bo.Cells(r, 12).Value))
+                fStatus = IIf(CStr(bo.Cells(r, 14).Value) = "Dropped", "Dropped", "Active")
+                fDropMonth = 0: fDropPos = -1: fDropYear = 0
+                fSection = ProgramSection(fProgram)
+                If fStatus = "Dropped" Then
+                    fDropMonth = MonthIndex(CStr(bo.Cells(r, 15).Value))
+                    fDropYear = CLng(Val(CStr(bo.Cells(r, 16).Value)))
+                    For i = 0 To fMonths - 1
+                        If SeqMonth(i) = fDropMonth And SchoolYear() + SeqYearOffset(i) = fDropYear Then fDropPos = i
+                    Next i
+                End If
+                If fSection = 0 Then
+                    res = "ERROR - program '" & fProgram & "' is not in the Settings Programs table"
+                ElseIf fName = "" Or fStartMonth = 0 Or fMonths < 1 Or fMonths > 12 Then
+                    res = "ERROR - row is incomplete (name, start month or months)"
+                Else
+                    months = ThisYearList(AttendedCount())
+                    If ArrLen(months) = 0 Then
+                        res = "Skipped - no months fall in " & SchoolYear()
+                    ElseIf Not CheckCapacity(months, "", True) Then
+                        res = "ERROR - " & gLastMessage
+                    ElseIf DuplicateMonths(months) <> "" Then
+                        res = "Skipped - " & fName & " is already on the sheet for " & DuplicateMonths(months)
+                    End If
+                End If
+                If res <> "" Then
+                    If Left$(res, 5) = "ERROR" Then nErr = nErr + 1 Else nSkip = nSkip + 1
+                Else
+                    existing = FindStudentID(fName)
+                    sid = UCase$(Trim$(CStr(bo.Cells(r, 2).Value)))
+                    If existing <> "" Then
+                        sid = existing
+                    ElseIf sid = "" Or StudentIdUsed(sid) Then
+                        sid = NextStudentID()
+                    End If
+                    WriteToMonths months, eid
+                    LogNew eid, sid, "Carry-over", months, Array(), IIf(IsDate(bo.Cells(r, 17).Value), bo.Cells(r, 17).Value, Now)
+                    res = "Imported " & Format$(Now, "yyyy-mm-dd") & " - " & MonthListText(months)
+                    nOk = nOk + 1
+                End If
+            End If
+            bo.Cells(r, 18).Value = res
+        End If
+    Next r
+    Application.ScreenUpdating = True
+    Notify "Carry-over import finished." & vbCrLf & vbCrLf & _
+           "Imported: " & nOk & vbCrLf & "Skipped: " & nSkip & vbCrLf & "Errors: " & nErr & vbCrLf & vbCrLf & _
+           "See the Import Result column for details.", IIf(nErr > 0, vbExclamation, vbInformation)
+    Exit Sub
+Fail:
+    Application.ScreenUpdating = True
+    Notify "Import stopped because of an error: " & Err.Description, vbCritical
+End Sub
+
+' Months (of the list) where fName is already in fSection; "" if none
+Private Function DuplicateMonths(months As Variant) As String
+    Dim i As Long, r As Long, ws As Worksheet, sc As Long, s As String
+    sc = SecCol(fSection)
+    For i = LBound(months) To UBound(months)
+        Set ws = Worksheets(MonthSheet(months(i)))
+        For r = FIRST_ROW To LAST_ROW
+            If StrComp(CleanText(CStr(ws.Cells(r, sc + 1).Value)), fName, vbTextCompare) = 0 Then
+                If s <> "" Then s = s & ", "
+                s = s & MonthSheet(months(i))
+                Exit For
+            End If
+        Next r
+    Next i
+    DuplicateMonths = s
+End Function
+
+Private Function StudentIdUsed(ByVal sid As String) As Boolean
+    Dim lg As Worksheet, r As Long
+    Set lg = Worksheets(SH_LOG)
+    For r = LOG_FIRST_ROW To LOG_LAST_ROW
+        If CStr(lg.Cells(r, LC_EID).Value) = "" Then Exit For
+        If StrComp(CStr(lg.Cells(r, LC_SID).Value), sid, vbTextCompare) = 0 Then
+            StudentIdUsed = True
+            Exit Function
+        End If
+    Next r
+End Function
+
+'==============================================================================
+'  MONTH SEQUENCE (position i = 0 .. fMonths-1 of the package)
+'==============================================================================
+Private Function SchoolYear() As Long
+    Dim v As Variant
+    v = SafeGet("cfgSchoolYear")
+    If IsNumeric(v) And CStr(v) <> "" Then SchoolYear = CLng(v) Else SchoolYear = Year(Date)
+End Function
+
+Private Function SeqPos(ByVal i As Long) As Long
+    SeqPos = (fStartMonth - 1) + 12 * fStartOffset + i
+End Function
+
+Private Function SeqMonth(ByVal i As Long) As Long
+    SeqMonth = (((SeqPos(i) Mod 12) + 12) Mod 12) + 1
+End Function
+
+' -1 = last year, 0 = this workbook's year, 1 = next year
+Private Function SeqYearOffset(ByVal i As Long) As Long
+    Dim p As Long
+    p = SeqPos(i)
+    If p < 0 Then
+        SeqYearOffset = -((-p - 1) \ 12) - 1
+    Else
+        SeqYearOffset = p \ 12
+    End If
+End Function
+
+' Number of package months actually attended (all, or up to the last month)
+Private Function AttendedCount() As Long
+    If fDropPos >= 0 Then AttendedCount = fDropPos + 1 Else AttendedCount = fMonths
+End Function
+
+Private Function ThisYearList(ByVal n As Long) As Variant
+    ThisYearList = YearList(n, 0)
+End Function
+
+Private Function NextYearList(ByVal n As Long) As Variant
+    NextYearList = YearList(n, 1)
+End Function
+
+Private Function YearList(ByVal n As Long, ByVal yearOffset As Long) As Variant
+    Dim a() As Long, c As Long, i As Long
+    For i = 0 To n - 1
+        If SeqYearOffset(i) = yearOffset Then c = c + 1
+    Next i
+    If c = 0 Then
+        YearList = Array()
+        Exit Function
+    End If
+    ReDim a(1 To c)
+    c = 0
+    For i = 0 To n - 1
+        If SeqYearOffset(i) = yearOffset Then
+            c = c + 1
+            a(c) = SeqMonth(i)
+        End If
+    Next i
+    YearList = a
+End Function
+
+Private Function FullSequenceText() As String
+    Dim i As Long, s As String
+    For i = 0 To fMonths - 1
+        If s <> "" Then s = s & ", "
+        s = s & MonthSheet(SeqMonth(i))
+    Next i
+    FullSequenceText = s
+End Function
+
+Private Function ListOrNone(months As Variant) As String
+    If ArrLen(months) = 0 Then ListOrNone = "(no months)" Else ListOrNone = MonthListText(months)
+End Function
+
+' This-year months plus next-year months of a history row
+Private Function CoveredText(ByVal r As Long) As String
+    Dim lg As Worksheet, a As String, b As String
+    Set lg = Worksheets(SH_LOG)
+    a = CStr(lg.Cells(r, LC_COVERED).Value)
+    b = CStr(lg.Cells(r, LC_NEXTYEAR).Value)
+    If b <> "" Then
+        b = Replace(b, ",", " (next year),") & " (next year)"
+        If a <> "" Then CoveredText = a & ", " & b Else CoveredText = b
+    Else
+        CoveredText = a
+    End If
+End Function
 
 '==============================================================================
 '  SETTINGS LOOKUPS
@@ -895,16 +1205,6 @@ End Function
 
 '==============================================================================
 '  HELPERS
-'==============================================================================
-Private Function CoveredMonths(ByVal startM As Long, ByVal dur As Long) As Variant
-    Dim a() As Long, i As Long
-    ReDim a(1 To dur)
-    For i = 1 To dur
-        a(i) = ((startM - 1 + i - 1) Mod 12) + 1
-    Next i
-    CoveredMonths = a
-End Function
-
 Private Function ArrLen(a As Variant) As Long
     On Error GoTo NoItems
     ArrLen = UBound(a) - LBound(a) + 1
@@ -991,10 +1291,12 @@ Private Function SectionIndex(ByVal s As String) As Long
     End If
 End Function
 
-Private Function FormSummary(months As Variant) As String
+Private Function FormSummary(months As Variant, nextM As Variant) As String
     FormSummary = "Program: " & fProgram & "  (" & SectionTitle(fSection) & ")" & vbCrLf & _
                   "Full Name: " & fName & vbCrLf & _
-                  "Package: " & fPackage & " = " & fMonths & " month(s): " & MonthListText(months) & vbCrLf & _
+                  "Package: " & fPackage & " = " & fMonths & " month(s)" & vbCrLf & _
+                  "This year: " & ListOrNone(months) & vbCrLf & _
+                  IIf(ArrLen(nextM) > 0, "Next year (End of Year sheet): " & ListOrNone(nextM) & vbCrLf, "") & _
                   "Program Fee: " & Peso(fFee) & "   Discount: " & Peso(fDiscount) & vbCrLf & _
                   "Net Price: " & Peso(fNet) & "   Per month: " & Peso(fPerMonth) & vbCrLf
 End Function

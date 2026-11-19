@@ -246,10 +246,9 @@ fields = [  # row, label, name, kind
     (12, "Program Fee (₱)", "outFee", "calc"),
     (13, "Discount (₱)", "inDiscount", "input"),
     (14, "Net Price (₱)", "outNetPrice", "calc"),
-    (15, "Per-Month Equivalent", "outPerMonth", "calc"),
-    (16, "Enrollment Status", "inStatus", "input"),
-    (17, "Drop Month", "inDropMonth", "input"),
-    (18, "Status Check", "outStatus", "calc"),
+    (15, "Enrollment Status", "inStatus", "input"),
+    (16, "Last Month Attended", "inDropMonth", "input"),
+    (17, "Status Check", "outStatus", "calc"),
 ]
 for r, label, nm, kind in fields:
     ds.row_dimensions[r].height = 22
@@ -277,17 +276,15 @@ ds["C11"] = ('=IF(OR(C10="",selMonths=0),"",IF(ISNA(MATCH(C10,MonthList,0)),"Inv
              '&" ("&selMonths&IF(selMonths=1," month)"," months)")))')
 ds["C12"] = '=IF(selMonths=0,"",INDEX(PkgFee,MATCH(TRIM(C6)&"|"&TRIM(C9),PkgKey,0)))'
 ds["C14"] = '=IF(C12="","",C12-N(C13))'
-ds["C15"] = '=IF(OR(C14="",selMonths=0),"",ROUND(C14/selMonths,2))'
-ds["C18"] = ('=IF(C6="","⚠ Select a program",IF(TRIM(C7)="","⚠ Enter the full name",'
+ds["C17"] = ('=IF(C6="","⚠ Select a program",IF(TRIM(C7)="","⚠ Enter the full name",'
              'IF(C9="","⚠ Select a package",IF(selMonths=0,"⚠ Package not found in Settings",'
              'IF(C10="","⚠ Select the start month",IF(N(C13)>N(C12),"⚠ Discount exceeds the program fee",'
-             'IF(AND(C16="Dropped",C5=""),"⚠ Dropped is only for UPDATE (load an enrollment first)",'
-             'IF(AND(C16="Dropped",C17=""),"⚠ Select the drop month",'
+             'IF(AND(C15="Dropped",C5=""),"⚠ Dropped is only for UPDATE (load an enrollment first)",'
+             'IF(AND(C15="Dropped",C16=""),"⚠ Select the last month attended",'
              'IF(C5="","✔ Ready to submit","✔ Ready to update")))))))))')
-for a in ("C12", "C13", "C14", "C15"):
+for a in ("C12", "C13", "C14"):
     ds[a].number_format = PESO
 ds["C14"].font = font(12, True, TOD_DARK)
-ds["C15"].font = font(11, True, PRE_DARK)
 
 hints = {
     6: "Choose from the Settings program list",
@@ -295,29 +292,30 @@ hints = {
     8: "Automatic — finds the student in Enrollment History",
     9: '=IF(selMonths>0,"Package covers "&selMonths&" month(s)",IF(C6="","Choose a program first","Choose a package"))',
     10: "First month the student attends",
-    11: "Automatic — from the package",
+    11: ('=IF(AND(selMonths>0,ISNUMBER(MATCH(C10,MonthList,0))),IF(MATCH(C10,MonthList,0)+selMonths-1>12,'
+         '"⚠ "&(MATCH(C10,MonthList,0)+selMonths-13)&" month(s) go to next year (End of Year sheet)",'
+         '"Automatic — from the package"),"Automatic — from the package")'),
     12: "Automatic — from the Settings price list",
     13: '=IF(N(C13)>N(C12),"⚠ Discount is greater than the fee!","Leave blank if none")',
     14: "Automatic — Program Fee − Discount",
-    15: "Automatic — Net Price ÷ package months (monthly sales)",
-    16: "Active (blank) or Dropped — Dropped is used with UPDATE",
-    17: "Removed from this month onward (only when Dropped)",
-    18: "Must show ✔ before clicking the button",
+    15: "Active (blank) or Dropped — Dropped is used with UPDATE",
+    16: "Last month the student attends; removed from the next month on",
+    17: "Must show ✔ before clicking the button",
 }
 for r, h in hints.items():
     c = ds.cell(r, 5, h)
     c.font = font(9, False, GREY_TXT, True)
     c.alignment = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
 
-ds.conditional_formatting.add("C18", FormulaRule(formula=['LEFT($C$18,1)="✔"'], fill=fill(TOD_LIGHT),
+ds.conditional_formatting.add("C17", FormulaRule(formula=['LEFT($C$17,1)="✔"'], fill=fill(TOD_LIGHT),
                               font=Font(name=FONT, bold=True, color=TOD_DARK)))
-ds.conditional_formatting.add("C18", FormulaRule(formula=['LEFT($C$18,1)="⚠"'], fill=fill("FFF2CC"),
+ds.conditional_formatting.add("C17", FormulaRule(formula=['LEFT($C$17,1)="⚠"'], fill=fill("FFF2CC"),
                               font=Font(name=FONT, bold=True, color="C00000")))
 ds.conditional_formatting.add("C8", FormulaRule(formula=['LEFT($C$8,9)="Returning"'], fill=fill(PRE_LIGHT),
                               font=Font(name=FONT, bold=True, color=PRE_DARK)))
 ds.conditional_formatting.add("E9:E13", FormulaRule(formula=['LEFT(E9,1)="⚠"'],
                               font=Font(name=FONT, bold=True, color="C00000")))
-ds.conditional_formatting.add("C16:C17", FormulaRule(formula=['$C$16="Dropped"'], fill=fill("FFF2CC"),
+ds.conditional_formatting.add("C15:C16", FormulaRule(formula=['$C$15="Dropped"'], fill=fill("FFF2CC"),
                               font=Font(name=FONT, bold=True, color="C00000")))
 
 
@@ -337,18 +335,17 @@ dv_add(ds, "C10", type="list", formula1="MonthList", allow_blank=True,
        error="Choose a month from January to December.", errorTitle="Invalid month")
 dv_add(ds, "C13", type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True,
        error="Discount must be zero or more.", errorTitle="Invalid discount")
-dv_add(ds, "C16", type="list", formula1='"Active,Dropped"', allow_blank=True,
+dv_add(ds, "C15", type="list", formula1='"Active,Dropped"', allow_blank=True,
        error="Choose Active or Dropped.", errorTitle="Invalid status")
-dv_add(ds, "C17", type="list", formula1="MonthList", allow_blank=True,
+dv_add(ds, "C16", type="list", formula1="MonthList", allow_blank=True,
        error="Choose a month from January to December.", errorTitle="Invalid month")
 
-ds.row_dimensions[19].height = 22
-ds.row_dimensions[20].height = 22
-ds.row_dimensions[21].height = 22
-ds.merge_cells("B20:E21")
-ds["B20"] = "Buttons appear here after running the macro  InstallUpKidzSystem  (see README)."
-ds["B20"].font = font(9, False, GREY_TXT, True)
-ds["B20"].alignment = CENTER
+for rr in (18, 19, 20, 21):
+    ds.row_dimensions[rr].height = 22
+ds.merge_cells("B19:E20")
+ds["B19"] = "Buttons appear here after running the macro  InstallUpKidzSystem  (see README)."
+ds["B19"].font = font(9, False, GREY_TXT, True)
+ds["B19"].alignment = CENTER
 
 # ---- right column ------------------------------------------------------------
 card_header(ds, "G4:J4", "MANAGE ENROLLMENTS")
@@ -416,10 +413,11 @@ ds["G20"].alignment = LEFT
 KPIS = [  # row, label, formula, fmt
     (22, "Total Students", "=IFERROR(" + IND.format("B5") + ",0)", "0"),
     (23, "Equivalent Sales", "=IFERROR(" + IND.format("D5") + ",0)", PESO),
-    (24, '="Royalty ("&TEXT(cfgRoyalty,"0%")&")"', "=IFERROR(" + IND.format("G5") + ",0)", PESO),
-    (25, '="Marketing Contribution ("&TEXT(cfgMarketing,"0%")&")"', "=IFERROR(" + IND.format("L5") + ",0)", PESO),
-    (26, "Retention Rate", "=IFERROR(" + IND.format("O5") + ",\"N/A\")", PCT),
-    (27, "Dropped (this month)", "=IFERROR(" + IND.format("T5") + ",0)", "0"),
+    (24, '="Royalty ("&TEXT(cfgRoyalty,"0%")&")"', "=IFERROR(" + IND.format("F5") + ",0)", PESO),
+    (25, '="Marketing Contribution ("&TEXT(cfgMarketing,"0%")&")"', "=IFERROR(" + IND.format("I5") + ",0)", PESO),
+    (26, "TOTAL DUES (Royalty + Marketing)", "=IFERROR(" + IND.format("L5") + ",0)", PESO),
+    (27, "Retention Rate", "=IFERROR(" + IND.format("O5") + ",\"N/A\")", PCT),
+    (28, "Dropped (last month attended)", "=IFERROR(" + IND.format("T5") + ",0)", "0"),
 ]
 for r, lbl, f, fmt in KPIS:
     ds.row_dimensions[r].height = 21
@@ -431,22 +429,22 @@ for r, lbl, f, fmt in KPIS:
     c = ds.cell(r, 9, f)
     c.font, c.number_format, c.alignment, c.border = font(12, True, NAVY), fmt, RIGHT, BORDER
     ds.cell(r, 10).border = BORDER
-ds.merge_cells("G28:J28")
-ds["G28"] = "=IFERROR(" + IND.format("O6") + ",\"\")"
-ds["G28"].font = font(8, False, GREY_TXT, True)
-ds["G28"].alignment = Alignment(horizontal="right", vertical="center")
+ds.merge_cells("G29:J29")
+ds["G29"] = "=IFERROR(" + IND.format("O6") + ",\"\")"
+ds["G29"].font = font(8, False, GREY_TXT, True)
+ds["G29"].alignment = Alignment(horizontal="right", vertical="center")
 
-ds["B23"] = "HOW TO USE"
-ds["B23"].font = font(10, True, NAVY)
+ds["B22"] = "HOW TO USE"
+ds["B22"].font = font(10, True, NAVY)
 steps = [
     "1. Type in the white cells (amber edge). Grey cells — fee, duration, net price, per month — fill in automatically.",
     "2. When Status Check shows ✔, click SUBMIT ENROLLMENT. The student is added to every month the package covers.",
     "3. Re-enroll: type the name in Student → RE-ENROLL → choose the new program/package → SUBMIT. History links both.",
-    "4. Drop: type the Enrollment ID → LOAD FOR EDIT → Enrollment Status = Dropped + Drop Month → UPDATE ENROLLMENT.",
+    "4. Drop: Enrollment ID → LOAD FOR EDIT → Status = Dropped + Last Month Attended → UPDATE (removed from the next month on).",
     "5. Cancel (entered by mistake): Enrollment ID → CANCEL ENROLLMENT. PROFILE shows a student's full history.",
 ]
 for i, s in enumerate(steps):
-    r = 24 + i
+    r = 23 + i
     ds.merge_cells(start_row=r, start_column=2, end_row=r, end_column=5)
     c = ds.cell(r, 2, s)
     c.font = font(9, False, "262626")
@@ -456,7 +454,7 @@ ds.page_setup.orientation = "landscape"
 ds.page_setup.fitToWidth = 1
 ds.page_setup.fitToHeight = 1
 ds.sheet_properties.pageSetUpPr.fitToPage = True
-ds.print_area = "A1:K29"
+ds.print_area = "A1:K30"
 
 
 # =============================================================================
@@ -464,9 +462,10 @@ ds.print_area = "A1:K29"
 # =============================================================================
 KPI_BLOCKS = [  # (first col, last col, label, value formula key, fmt)
     ("B", "C", "TOTAL STUDENTS", "students", "0"),
-    ("D", "F", "EQUIVALENT SALES", "equiv", PESO),
-    ("G", "K", "ROYALTY", "royalty", PESO),
-    ("L", "N", "MARKETING CONTRIBUTION", "marketing", PESO),
+    ("D", "E", "EQUIVALENT SALES", "equiv", PESO),
+    ("F", "H", "ROYALTY", "royalty", PESO),
+    ("I", "K", "MARKETING CONTRIBUTION", "marketing", PESO),
+    ("L", "N", "TOTAL DUES", "dues", PESO),
     ("O", "S", "RETENTION RATE", "retention", PCT),
     ("T", "V", "DROPPED", "dropped", "0"),
 ]
@@ -513,14 +512,16 @@ def build_month(ws, idx, month):
     else:
         ws["Z4"] = 0
         ws["Z5"] = 0
-    ws["Z6"] = (f"=COUNTIFS('Enrollment History'!$P${LOG_FIRST}:$P${LOG_LAST},\"Dropped\","
-                f"'Enrollment History'!$Q${LOG_FIRST}:$Q${LOG_LAST},\"{month}\")")
+    ws["Z6"] = (f"=COUNTIFS('Enrollment History'!$R${LOG_FIRST}:$R${LOG_LAST},\"Dropped\","
+                f"'Enrollment History'!$S${LOG_FIRST}:$S${LOG_LAST},\"{month}\","
+                f"'Enrollment History'!$T${LOG_FIRST}:$T${LOG_LAST},cfgSchoolYear)")
 
     vals = {
         "students": f"=COUNTA(C{FIRST_ROW}:C{LAST_ROW})+COUNTA(K{FIRST_ROW}:K{LAST_ROW})+COUNTA(S{FIRST_ROW}:S{LAST_ROW})",
         "equiv": "=G8+O8+V8",
         "royalty": "=D5*cfgRoyalty",
         "marketing": "=D5*cfgMarketing",
+        "dues": "=F5+I5",
         "retention": '=IF(N(Z5)=0,"N/A",Z4/Z5)',
         "dropped": "=Z6",
     }
@@ -529,9 +530,10 @@ def build_month(ws, idx, month):
         "equiv": "Σ Price ÷ package months",
         "royalty": '=TEXT(cfgRoyalty,"0%")&" of equivalent sales"',
         "marketing": '=TEXT(cfgMarketing,"0%")&" of equivalent sales"',
+        "dues": "Royalty + Marketing Contribution",
         "retention": (f'=IF(N(Z5)=0,"No students last month",Z4&" of "&Z5&" students from {prev} stayed")'
                       if prev else '="First month — no previous month"'),
-        "dropped": "Drops effective this month",
+        "dropped": "Last month attended = this month",
     }
     for c1, c2, label, key, fmt in KPI_BLOCKS:
         for r in (4, 5, 6):
@@ -642,9 +644,10 @@ lg.sheet_properties.tabColor = ACCENT
 lg.sheet_view.showGridLines = False
 HIST = [("Enrollment ID", 13), ("Student ID", 11), ("Date Submitted", 16), ("Type", 13), ("Program", 22),
         ("Section", 18), ("Full Name", 26), ("Package", 11), ("Months", 8), ("Start Month", 11),
-        ("Months Covered", 34), ("Program Fee", 12), ("Discount", 11), ("Net Price", 12), ("Per Month", 12),
-        ("Status", 10), ("Drop Month", 11), ("Last Updated", 16), ("Remarks", 40)]
-banner(lg, "A1:S1", "A2:S2", "ENROLLMENT HISTORY",
+        ("Start Year", 9), ("Months Covered (this year)", 34), ("Next-Year Months", 26), ("Program Fee", 12),
+        ("Discount", 11), ("Net Price", 12), ("Per Month", 12), ("Status", 10), ("Last Month Attended", 12),
+        ("Last Month Year", 9), ("Last Updated", 16), ("Remarks", 40)]
+banner(lg, "A1:V1", "A2:V2", "ENROLLMENT HISTORY",
        "Every enrollment, re-enrollment, drop and cancellation — one row per enrollment, linked by Student ID")
 for j, (h, w) in enumerate(HIST):
     lg.column_dimensions[L(j + 1)].width = w
@@ -654,20 +657,22 @@ for r in range(LOG_FIRST, LOG_LAST + 1):
     for j in range(1, len(HIST) + 1):
         c = lg.cell(r, j)
         c.font = font(9)
-        if j in (12, 13, 14, 15):
+        if j in (14, 15, 16, 17):
             c.number_format = PESO
-        elif j in (3, 18):
+        elif j in (3, 21):
             c.number_format = "yyyy-mm-dd hh:mm"
 lg.freeze_panes = "C5"
-lg.auto_filter.ref = f"A4:S{LOG_LAST}"
-lg.conditional_formatting.add(f"A{LOG_FIRST}:S{LOG_LAST}", FormulaRule(
-    formula=[f'$P{LOG_FIRST}="Cancelled"'], font=Font(name=FONT, color="A6A6A6", strike=True)))
-lg.conditional_formatting.add(f"P{LOG_FIRST}:Q{LOG_LAST}", FormulaRule(
-    formula=[f'$P{LOG_FIRST}="Dropped"'], font=Font(name=FONT, bold=True, color="C00000"), fill=fill("FFF2CC")))
-lg.conditional_formatting.add(f"P{LOG_FIRST}:P{LOG_LAST}", FormulaRule(
-    formula=[f'$P{LOG_FIRST}="Active"'], font=Font(name=FONT, bold=True, color=TOD_DARK), fill=fill(TOD_LIGHT)))
+lg.auto_filter.ref = f"A4:V{LOG_LAST}"
+lg.conditional_formatting.add(f"A{LOG_FIRST}:V{LOG_LAST}", FormulaRule(
+    formula=[f'$R{LOG_FIRST}="Cancelled"'], font=Font(name=FONT, color="A6A6A6", strike=True)))
+lg.conditional_formatting.add(f"R{LOG_FIRST}:T{LOG_LAST}", FormulaRule(
+    formula=[f'$R{LOG_FIRST}="Dropped"'], font=Font(name=FONT, bold=True, color="C00000"), fill=fill("FFF2CC")))
+lg.conditional_formatting.add(f"R{LOG_FIRST}:R{LOG_LAST}", FormulaRule(
+    formula=[f'$R{LOG_FIRST}="Active"'], font=Font(name=FONT, bold=True, color=TOD_DARK), fill=fill(TOD_LIGHT)))
 lg.conditional_formatting.add(f"D{LOG_FIRST}:D{LOG_LAST}", FormulaRule(
-    formula=[f'$D{LOG_FIRST}="Re-enrollment"'], font=Font(name=FONT, bold=True, color=PRE_DARK), fill=fill(PRE_LIGHT)))
+    formula=[f'$D{LOG_FIRST}<>"New"'], font=Font(name=FONT, bold=True, color=PRE_DARK), fill=fill(PRE_LIGHT)))
+lg.conditional_formatting.add(f"M{LOG_FIRST}:M{LOG_LAST}", FormulaRule(
+    formula=[f'$M{LOG_FIRST}<>""'], font=Font(name=FONT, bold=True, color="7F6000"), fill=fill("FFF2CC")))
 lg.page_setup.orientation = "landscape"
 lg.page_setup.fitToWidth = 1
 lg.page_setup.fitToHeight = 0
@@ -679,13 +684,13 @@ lg.sheet_properties.pageSetUpPr.fitToPage = True
 sm = wb.create_sheet("Monthly Summary")
 sm.sheet_properties.tabColor = ACCENT
 sm.sheet_view.showGridLines = False
-banner(sm, "A1:N1", "A2:N2", "MONTHLY SUMMARY",
-       "Students, equivalent sales, royalty, marketing, retention and drops per month")
+banner(sm, "A1:O1", "A2:O2", "MONTHLY SUMMARY",
+       "Students, equivalent sales, royalty, marketing, total dues, retention and drops per month")
 heads = [("Month", NAVY), ("Toddlers\nStudents", TOD_DARK), ("Preschool\nStudents", PRE_DARK),
          ("One-on-One\nStudents", TUT_DARK), ("Total\nStudents", NAVY), ("Toddlers\nPer Month", TOD_DARK),
          ("Preschool\nPer Month", PRE_DARK), ("One-on-One\nPer Month", TUT_DARK), ("Equivalent\nSales", NAVY),
-         ("Royalty", NAVY), ("Marketing\nContribution", NAVY), ("Retained", NAVY), ("Retention\nRate", NAVY),
-         ("Dropped", NAVY)]
+         ("Royalty", NAVY), ("Marketing\nContribution", NAVY), ("Total Dues", NAVY), ("Retained", NAVY),
+         ("Retention\nRate", NAVY), ("Dropped", NAVY)]
 for j, (h, col) in enumerate(heads):
     sm.column_dimensions[L(j + 1)].width = 13 if j else 14
     header_cell(sm.cell(4, j + 1), h, color=col)
@@ -694,48 +699,49 @@ for i, m in enumerate(MONTHS):
     r = 5 + i
     vals = [m, f"=COUNTA({m}!C{FIRST_ROW}:C{LAST_ROW})", f"=COUNTA({m}!K{FIRST_ROW}:K{LAST_ROW})",
             f"=COUNTA({m}!S{FIRST_ROW}:S{LAST_ROW})", f"={m}!B5", f"={m}!G8", f"={m}!O8", f"={m}!V8",
-            f"={m}!D5", f"={m}!G5", f"={m}!L5", f"={m}!Z4", f"={m}!O5", f"={m}!T5"]
+            f"={m}!D5", f"={m}!F5", f"={m}!I5", f"={m}!L5", f"={m}!Z4", f"={m}!O5", f"={m}!T5"]
     for j, v in enumerate(vals):
         c = sm.cell(r, j + 1, v)
         c.border = BORDER
         c.fill = fill(TUT_LIGHT) if i % 2 else fill(WHITE)
-        c.font = font(10, j in (0, 4, 8), "000000")
-        if j in (5, 6, 7, 8, 9, 10):
+        c.font = font(10, j in (0, 4, 8, 11), "000000")
+        if j in (5, 6, 7, 8, 9, 10, 11):
             c.number_format, c.alignment = PESO, RIGHT
-        elif j == 12:
+        elif j == 13:
             c.number_format, c.alignment = PCT, MID
         elif j:
             c.alignment = MID
 r = 17
 sm.cell(r, 1, "TOTAL / AVG")
-for j in range(2, 15):
+for j in range(2, 16):
     col = L(j)
-    if j == 13:
+    if j == 14:
         f = f'=IFERROR(AVERAGE({col}5:{col}16),"N/A")'
     else:
         f = f"=SUM({col}5:{col}16)"
     sm.cell(r, j, f)
-for j in range(1, 15):
+for j in range(1, 16):
     c = sm.cell(r, j)
     c.font, c.fill, c.border = font(10, True, ACCENT), fill(NAVY), BORDER
-    c.number_format = PESO if j in (6, 7, 8, 9, 10, 11) else (PCT if j == 13 else "0")
-    c.alignment = RIGHT if j in (6, 7, 8, 9, 10, 11) else MID
+    c.number_format = PESO if j in (6, 7, 8, 9, 10, 11, 12) else (PCT if j == 14 else "0")
+    c.alignment = RIGHT if j in (6, 7, 8, 9, 10, 11, 12) else MID
 sm["A17"].alignment = LEFT
 sm["A19"] = ("Equivalent Sales = Σ (Price ÷ package months) of every student on that month's sheet.  "
-             "Royalty and Marketing use the rates on the Settings sheet.  Retention Rate = students who were also "
+             "Royalty and Marketing use the rates on the Settings sheet; Total Dues = Royalty + Marketing.  Retention Rate = students who were also "
              "enrolled last month ÷ total students last month × 100 (January has no previous month).  "
              "Students TOTAL counts student-months; Retention 'TOTAL / AVG' is the average of the monthly rates.")
 sm["A19"].font = font(9, False, GREY_TXT, True)
 sm["A19"].alignment = Alignment(wrap_text=True, vertical="top")
-sm.merge_cells("A19:N20")
+sm.merge_cells("A19:O20")
 sm.row_dimensions[19].height = 24
 sm["A22"] = "Enrollment records"
 sm["A22"].font = font(10, True, NAVY)
 for k, (lbl, f) in enumerate([
-        ("Active", f"=COUNTIF('Enrollment History'!$P${LOG_FIRST}:$P${LOG_LAST},\"Active\")"),
-        ("Dropped", f"=COUNTIF('Enrollment History'!$P${LOG_FIRST}:$P${LOG_LAST},\"Dropped\")"),
-        ("Cancelled", f"=COUNTIF('Enrollment History'!$P${LOG_FIRST}:$P${LOG_LAST},\"Cancelled\")"),
+        ("Active", f"=COUNTIF('Enrollment History'!$R${LOG_FIRST}:$R${LOG_LAST},\"Active\")"),
+        ("Dropped", f"=COUNTIF('Enrollment History'!$R${LOG_FIRST}:$R${LOG_LAST},\"Dropped\")"),
+        ("Cancelled", f"=COUNTIF('Enrollment History'!$R${LOG_FIRST}:$R${LOG_LAST},\"Cancelled\")"),
         ("Re-enrollments", f"=COUNTIF('Enrollment History'!$D${LOG_FIRST}:$D${LOG_LAST},\"Re-enrollment\")"),
+        ("Carry-overs (from last year)", f"=COUNTIF('Enrollment History'!$D${LOG_FIRST}:$D${LOG_LAST},\"Carry-over\")"),
         ("Total enrollments", f"=COUNTA('Enrollment History'!$A${LOG_FIRST}:$A${LOG_LAST})")]):
     sm.cell(23 + k, 1, lbl).font = font(10)
     c = sm.cell(23 + k, 2, f)
@@ -774,7 +780,7 @@ ss["B3"].font = font(11, True, INPUT_TXT)
 ss["D3"].font = font(10, True, GREY_TXT)
 SH = [("Student ID", 11), ("Full Name", 26), ("Enrollment ID", 13), ("Type", 13), ("Program", 22),
       ("Package", 11), ("Start Month", 11), ("Months Covered", 34), ("Net Price", 12), ("Per Month", 12),
-      ("Status", 10), ("Drop Month", 11)]
+      ("Status", 10), ("Last Month", 11)]
 for j, (h, w) in enumerate(SH):
     ss.column_dimensions[L(j + 1)].width = w
     header_cell(ss.cell(5, j + 1), h, color=PRE_DARK)
@@ -790,7 +796,86 @@ ss.conditional_formatting.add("A6:L505", FormulaRule(formula=['$K6="Cancelled"']
 ss.conditional_formatting.add("A6:L505", FormulaRule(formula=['AND($A6<>"",MOD(ROW(),2)=1)'], fill=fill(PRE_LIGHT)))
 ss.freeze_panes = "A6"
 
-order = ["Dashboard"] + MONTHS + ["Monthly Summary", "Enrollment History", "Student Search", "Settings"]
+# =============================================================================
+# END OF YEAR (carry-over out) / BEGINNING OF YEAR (carry-over in)
+# =============================================================================
+CARRY_HDR, CARRY_FIRST, CARRY_LAST = 8, 9, 208
+CARRY = [("Enrollment ID", 13), ("Student ID", 11), ("Full Name", 26), ("Program", 22), ("Package", 11),
+         ("Months", 8), ("Start Month", 11), ("Start Year", 9), ("Program Fee", 12), ("Discount", 11),
+         ("Net Price", 12), ("Per Month", 12), ("Next-Year Months", 30), ("Status", 10),
+         ("Last Month Attended", 12), ("Last Month Year", 9), ("Date Submitted", 16)]
+
+
+def build_carry(ws, title, sub, note, with_result):
+    ws.sheet_view.showGridLines = False
+    ncol = len(CARRY) + (1 if with_result else 0)
+    last = L(ncol)
+    banner(ws, f"A1:{last}1", f"A2:{last}2", title, sub)
+    ws.merge_cells("A3:N3")
+    ws["A3"] = note
+    ws["A3"].font = font(9, True, "7F6000")
+    ws["A3"].fill = fill("FFF2CC")
+    ws["A3"].alignment = Alignment(wrap_text=True, vertical="center", indent=1)
+    ws.row_dimensions[3].height = 42
+    # summary by next-year month
+    ws["A4"] = "Next-year month"
+    ws["A5"] = "Students"
+    ws["A6"] = "Equivalent sales"
+    for r in (4, 5, 6):
+        c = ws.cell(r, 1)
+        c.font, c.fill, c.border, c.alignment = font(9, True, WHITE), fill(NAVY), BORDER, LEFT
+    for i, m in enumerate(MONTHS):
+        col = L(2 + i)
+        h = ws.cell(4, 2 + i, m)
+        h.font, h.fill, h.border, h.alignment = font(9, True, ACCENT), fill(NAVY), BORDER, MID
+        c = ws.cell(5, 2 + i, f'=COUNTIF($M${CARRY_FIRST}:$M${CARRY_LAST},"*"&{col}$4&"*")')
+        c.font, c.border, c.alignment = font(10, True, NAVY), BORDER, MID
+        c = ws.cell(6, 2 + i, f'=SUMIF($M${CARRY_FIRST}:$M${CARRY_LAST},"*"&{col}$4&"*",$L${CARRY_FIRST}:$L${CARRY_LAST})')
+        c.font, c.border, c.alignment, c.number_format = font(9), BORDER, RIGHT, PESO
+    c = ws.cell(4, 14, "Enrollments")
+    c.font, c.fill, c.border, c.alignment = font(9, True, ACCENT), fill(NAVY), BORDER, MID
+    c = ws.cell(5, 14, f"=COUNTA(A{CARRY_FIRST}:A{CARRY_LAST})")
+    c.font, c.border, c.alignment = font(12, True, NAVY), BORDER, MID
+    heads = CARRY + ([("Import Result", 30)] if with_result else [])
+    for j, (h, w) in enumerate(heads):
+        ws.column_dimensions[L(j + 1)].width = max(w, 11)
+        header_cell(ws.cell(CARRY_HDR, j + 1), h, color=PRE_DARK if not with_result else TOD_DARK)
+    ws.column_dimensions["A"].width = 16
+    ws.row_dimensions[CARRY_HDR].height = 30
+    for r in range(CARRY_FIRST, CARRY_LAST + 1):
+        for j in range(1, ncol + 1):
+            c = ws.cell(r, j)
+            c.font, c.border = font(9), BORDER
+            if j in (9, 10, 11, 12):
+                c.number_format = PESO
+            elif j == 17:
+                c.number_format = "yyyy-mm-dd hh:mm"
+            if (r - CARRY_FIRST) % 2:
+                c.fill = fill(TUT_LIGHT)
+    ws.freeze_panes = f"B{CARRY_FIRST}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+eoy = wb.create_sheet("End of Year")
+eoy.sheet_properties.tabColor = "7F6000"
+build_carry(eoy, "END OF YEAR — CARRY-OVER TO NEXT YEAR",
+            "Months of this year's enrollments that fall in NEXT year (filled automatically — do not type here)",
+            "Packages that continue past December are listed here instead of being put in this year's January–March. "
+            "At year end: select the table rows (from row 9 down) → Copy → in NEXT year's workbook open "
+            "'Beginning of Year' → click cell A9 → Paste Values → click IMPORT CARRY-OVER.", False)
+boy = wb.create_sheet("Beginning of Year")
+boy.sheet_properties.tabColor = "7F6000"
+build_carry(boy, "BEGINNING OF YEAR — CARRY-OVER FROM LAST YEAR",
+            "Paste last year's End of Year rows here, then click IMPORT CARRY-OVER",
+            "Paste (values) the rows copied from LAST year's End of Year sheet at cell A9, then click IMPORT CARRY-OVER. "
+            "The students are added to this year's monthly sheets and Enrollment History (Type = Carry-over). "
+            "Rows already imported are skipped, so clicking twice is safe.", True)
+
+order = ["Dashboard"] + MONTHS + ["Monthly Summary", "Enrollment History", "Student Search",
+                                  "End of Year", "Beginning of Year", "Settings"]
 wb._sheets = [wb[n] for n in order]
 wb.active = 0
 for ws in wb.worksheets:
